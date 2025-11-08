@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  tgId      String   @unique
+  role      String   @default("CUSTOMER")
+  name      String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Booking {
+  id            String   @id @default(cuid())
+  dateStart     DateTime
+  dateEnd       DateTime
+  durationMin   Int
+  status        String   @default("PENDING")
+  source        String   @default("BOT")
+  customerName  String?
+  customerPhone String?
+  tgCustomerId  String?
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([dateStart, dateEnd])
+  @@index([status])
+}
+
+model Settings {
+  id                Int      @id @default(1)
+  timeZone          String   @default("Europe/Kyiv")
+  workingDays       String   @default("1,2,3,4,5,6,7")
+  dayOpenTime       String   @default("09:00")
+  dayCloseTime      String   @default("23:00")
+  allowedDurations  String   @default("2,3,4")
+  cleaningBufferMin Int      @default(0)
+  lastUpdatedBy     String?
+  updatedAt         DateTime @updatedAt
+}
