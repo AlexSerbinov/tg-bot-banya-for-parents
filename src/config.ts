@@ -23,7 +23,7 @@ export const config = {
   dayOpenTime: process.env.DAY_OPEN_TIME || '09:00',
   dayCloseTime: process.env.DAY_CLOSE_TIME || '23:00',
   allowedDurations: process.env.ALLOWED_DURATIONS || '2,3,4',
-  cleaningBufferMin: parseInt(process.env.CLEANING_BUFFER_MIN || '0', 10),
+  cleaningBufferMin: parseInt(process.env.CLEANING_BUFFER_MIN || '60', 10),
   apiPort: parseInt(process.env.API_PORT || '3000', 10),
   apiBasicToken: process.env.API_BASIC_TOKEN || 'supersecretapitoken',
   webhookUrl: process.env.WEBHOOK_URL || '',

@@ -20,9 +20,13 @@ async function main() {
   bot.use(ensureUserMiddleware);
 
   // Register handlers
+  console.log('📝 Registering handlers...');
   registerStartHandlers(bot);
+  console.log('✅ Start handlers registered');
   registerCustomerHandlers(bot);
+  console.log('✅ Customer handlers registered');
   registerAdminHandlers(bot);
+  console.log('✅ Admin handlers registered');
 
   // Error handling
   bot.catch((err, ctx) => {

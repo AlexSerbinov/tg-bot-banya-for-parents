@@ -138,7 +138,34 @@ export function getBookingConfirmKeyboard(
 export function getBookingSubmittedKeyboard(bookingId: string) {
   return Markup.inlineKeyboard([
     [
+      Markup.button.callback('🟢 🏠 Головне меню', 'BACK_TO_MAIN'),
+    ],
+    [
       Markup.button.callback('✏️ Редагувати заявку', `EDIT_BOOKING:${bookingId}`),
+    ],
+    [
+      Markup.button.callback('❌ Скасувати заявку', `CANCEL_BOOKING:${bookingId}`),
+    ],
+  ]);
+}
+
+// Booking keyboard without main menu button (after returning to main menu)
+export function getBookingKeyboard(bookingId: string) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✏️ Редагувати заявку', `EDIT_BOOKING:${bookingId}`),
+    ],
+    [
+      Markup.button.callback('❌ Скасувати заявку', `CANCEL_BOOKING:${bookingId}`),
+    ],
+  ]);
+}
+
+// Booking keyboard with comment (shows "Change comment" instead of "Edit booking")
+export function getBookingKeyboardWithComment(bookingId: string) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✏️ Змінити коментар', `EDIT_BOOKING:${bookingId}`),
     ],
     [
       Markup.button.callback('❌ Скасувати заявку', `CANCEL_BOOKING:${bookingId}`),
@@ -186,6 +213,24 @@ export function getBookingManagementKeyboard(bookingId: string) {
   return Markup.inlineKeyboard([
     [Markup.button.callback('❌ Скасувати', `CANCEL:${bookingId}`)],
     [Markup.button.callback('« Назад', 'BACK_TO_BOOKINGS')],
+  ]);
+}
+
+// Admin booking customer input keyboard
+export function getAdminBookingCustomerKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📝 Ввести дані клієнта', 'ADMIN_INPUT_CUSTOMER')],
+    [Markup.button.callback('✅ Підтвердити', 'ADMIN_CONFIRM_BOOKING')],
+    [Markup.button.callback('❌ Скасувати', 'ADMIN_CANCEL')],
+  ]);
+}
+
+// Admin booking phone input keyboard
+export function getAdminBookingPhoneKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📞 Ввести телефон клієнта', 'ADMIN_INPUT_PHONE')],
+    [Markup.button.callback('✅ Підтвердити бронювання', 'ADMIN_FINAL_CONFIRM')],
+    [Markup.button.callback('❌ Скасувати', 'ADMIN_CANCEL')],
   ]);
 }
 
@@ -332,7 +377,7 @@ export function getAdminTimeSelectionKeyboard(dateISO: string, duration: number)
 export function getAdminBookingConfirmKeyboard() {
   return Markup.inlineKeyboard([
     [Markup.button.callback('✅ Підтвердити і створити', 'ADMIN_CONFIRM_CREATE')],
-    [Markup.button.callback('« Назад', 'ADMIN_BACK_TO_TIME')],
+    [Markup.button.callback('« Назад', 'ADMIN_BACK_TO_PREVIOUS')],
     [Markup.button.callback('❌ Скасувати', 'ADMIN_CANCEL')],
   ]);
 }

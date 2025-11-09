@@ -5,10 +5,10 @@ import {
   getBookingRejectedMessage,
 } from '../../core/notifications';
 import { formatDateTime, formatDate, formatTime, getNextDays, dateToISO, parseISODate } from '../../core/time';
-import { getApprovalKeyboard, getRejectionReasonKeyboard, getAdminDateSelectionKeyboard, getAdminDurationKeyboard, getAdminTimeSelectionKeyboard, getAdminBookingConfirmKeyboard } from '../keyboards';
+import { getApprovalKeyboard, getRejectionReasonKeyboard, getAdminDateSelectionKeyboard, getAdminDurationKeyboard, getAdminTimeSelectionKeyboard, getAdminBookingConfirmKeyboard, getAdminBookingCustomerKeyboard, getAdminBookingPhoneKeyboard } from '../keyboards';
 import prisma from '../../db/prismaClient';
 import { config } from '../../config';
-import { getAvailableSlots } from '../../core/rules';
+import { generateSlots } from '../../core/rules';
 import { Markup } from 'telegraf';
 
 export function registerAdminHandlers(bot: Telegraf<BotContext>) {
@@ -387,12 +387,13 @@ export function registerAdminHandlers(bot: Telegraf<BotContext>) {
 
     const date = parseISODate(dateISO);
 
-    // Запитуємо ім'я клієнта
+    // Показуємо кнопки для вибору дії
     session.awaitingInput = 'admin_customer_name';
     setSession(tgId, session);
 
     await ctx.editMessageText(
-      `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Час: ${time} (${duration} год)\n\n👤 Крок 4: Введіть ім'я клієнта\n\n👇 Напишіть ім'я нижче 👇`
+      `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Час: ${time} (${duration} год)\n\n👤 Дані клієнта`,
+      getAdminBookingCustomerKeyboard()
     );
     await ctx.answerCbQuery();
   });
@@ -408,6 +409,138 @@ export function registerAdminHandlers(bot: Telegraf<BotContext>) {
 
     await ctx.editMessageText('❌ Додавання бронювання скасовано');
     await ctx.answerCbQuery();
+  });
+
+  // Admin manual booking - Input customer data
+  bot.action('ADMIN_INPUT_CUSTOMER', async (ctx) => {
+    const tgId = ctx.from.id.toString();
+    const session = getSession(tgId);
+
+    // Встановлюємо очікування вводу імені
+    session.awaitingInput = 'admin_customer_name';
+    setSession(tgId, session);
+
+    await ctx.editMessageText(
+      (ctx.callbackQuery.message as any).text + '\n\n👇 Напишіть ім\'я клієнта нижче 👇'
+    );
+    await ctx.answerCbQuery();
+  });
+
+  // Admin manual booking - Confirm without customer data
+  bot.action('ADMIN_CONFIRM_BOOKING', async (ctx) => {
+    const tgId = ctx.from.id.toString();
+    const session = getSession(tgId);
+
+    const bookingData = session.adminBookingData;
+    if (!bookingData) {
+      await ctx.answerCbQuery('Помилка: дані бронювання не знайдено');
+      return;
+    }
+
+    try {
+      const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+      if (!settings) {
+        await ctx.answerCbQuery('Помилка налаштувань');
+        return;
+      }
+
+      const start = parseISODate(`${bookingData.dateISO}T${bookingData.time}:00`);
+      const end = new Date(start.getTime() + bookingData.duration * 60 * 60 * 1000);
+
+      // Створюємо бронювання без даних клієнта
+      const booking = await prisma.booking.create({
+        data: {
+          dateStart: start,
+          dateEnd: end,
+          durationMin: bookingData.duration * 60,
+          status: 'CONFIRMED',
+          source: 'ADMIN',
+          customerName: 'Клієнт',
+          customerPhone: '-',
+          tgCustomerId: 'admin',
+          note: 'Створено адміністратором',
+        },
+      });
+
+      // Очищуємо сесію
+      session.adminBookingData = undefined;
+      session.awaitingInput = undefined;
+      setSession(tgId, session);
+
+      await ctx.editMessageText(
+        `✅ Бронювання успішно створено!\n\n📅 Дата: ${formatDate(booking.dateStart, settings.timeZone)}\n⏱ Час: ${formatTime(booking.dateStart, settings.timeZone)}\n⏱ Тривалість: ${bookingData.duration} год`
+      );
+      await ctx.answerCbQuery('✅ Бронювання створено');
+    } catch (error) {
+      console.error('Error creating admin booking:', error);
+      await ctx.answerCbQuery('❌ Помилка при створенні бронювання');
+    }
+  });
+
+  // Admin manual booking - Input phone
+  bot.action('ADMIN_INPUT_PHONE', async (ctx) => {
+    const tgId = ctx.from.id.toString();
+    const session = getSession(tgId);
+
+    // Встановлюємо очікування вводу телефону
+    session.awaitingInput = 'admin_customer_phone';
+    setSession(tgId, session);
+
+    await ctx.editMessageText(
+      (ctx.callbackQuery.message as any).text + '\n\n👇 Напишіть телефон клієнта нижче 👇'
+    );
+    await ctx.answerCbQuery();
+  });
+
+  // Admin manual booking - Final confirm with name only
+  bot.action('ADMIN_FINAL_CONFIRM', async (ctx) => {
+    const tgId = ctx.from.id.toString();
+    const session = getSession(tgId);
+
+    const bookingData = session.adminBookingData;
+    if (!bookingData) {
+      await ctx.answerCbQuery('Помилка: дані бронювання не знайдено');
+      return;
+    }
+
+    try {
+      const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+      if (!settings) {
+        await ctx.answerCbQuery('Помилка налаштувань');
+        return;
+      }
+
+      const start = parseISODate(`${bookingData.dateISO}T${bookingData.time}:00`);
+      const end = new Date(start.getTime() + bookingData.duration * 60 * 60 * 1000);
+
+      // Створюємо бронювання з ім'ям клієнта
+      const booking = await prisma.booking.create({
+        data: {
+          dateStart: start,
+          dateEnd: end,
+          durationMin: bookingData.duration * 60,
+          status: 'CONFIRMED',
+          source: 'ADMIN',
+          customerName: bookingData.customerName || 'Клієнт',
+          customerPhone: '-',
+          tgCustomerId: 'admin',
+          note: 'Створено адміністратором',
+        },
+      });
+
+      // Очищуємо сесію
+      session.adminBookingData = undefined;
+      session.awaitingInput = undefined;
+      setSession(tgId, session);
+
+      await ctx.editMessageText(
+        `✅ Бронювання успішно створено!\n\n📅 Дата: ${formatDate(booking.dateStart, settings.timeZone)}\n⏱ Час: ${formatTime(booking.dateStart, settings.timeZone)}\n⏱ Тривалість: ${bookingData.duration} год\n👤 Клієнт: ${booking.customerName}`
+      );
+      await ctx.answerCbQuery('✅ Бронювання створено');
+    } catch (error) {
+      console.error('Error creating admin booking:', error);
+      await ctx.answerCbQuery('❌ Помилка при створенні бронювання');
+    }
   });
 
   // Admin manual booking - Back to date
@@ -427,8 +560,8 @@ export function registerAdminHandlers(bot: Telegraf<BotContext>) {
     await ctx.answerCbQuery();
   });
 
-  // Admin manual booking - Back to time
-  bot.action('ADMIN_BACK_TO_TIME', async (ctx) => {
+  // Admin manual booking - Back to previous step
+  bot.action('ADMIN_BACK_TO_PREVIOUS', async (ctx) => {
     const tgId = ctx.from.id.toString();
     const session = getSession(tgId);
 
@@ -443,13 +576,31 @@ export function registerAdminHandlers(bot: Telegraf<BotContext>) {
       return;
     }
 
-    const { dateISO, duration } = session.adminBookingData;
+    const { dateISO, duration, customerName, customerPhone } = session.adminBookingData;
     const date = parseISODate(dateISO);
 
-    await ctx.editMessageText(
-      `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Тривалість: ${duration} год\n\n🕐 Крок 3: Оберіть час`,
-      getAdminTimeSelectionKeyboard(dateISO, duration)
-    );
+    // Якщо є телефон, повертаємося до кроку з введення телефону
+    if (customerPhone) {
+      await ctx.editMessageText(
+        `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Час: ${session.adminBookingData.time} (${duration} год)\n👤 Ім'я: ${customerName}\n\n📞 Телефон клієнта`,
+        getAdminBookingPhoneKeyboard()
+      );
+    }
+    // Якщо є тільки ім'я, повертаємося до кроку з вибору дій (ввести телефон чи підтвердити)
+    else if (customerName) {
+      await ctx.editMessageText(
+        `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Час: ${session.adminBookingData.time} (${duration} год)\n\n👤 Дані клієнта`,
+        getAdminBookingPhoneKeyboard()
+      );
+    }
+    // Якщо немає даних клієнта, повертаємося до вибору часу
+    else {
+      await ctx.editMessageText(
+        `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Тривалість: ${duration} год\n\n🕐 Крок 3: Оберіть час`,
+        getAdminTimeSelectionKeyboard(dateISO, duration)
+      );
+    }
+
     await ctx.answerCbQuery();
   });
 
@@ -576,7 +727,8 @@ export function registerAdminHandlers(bot: Telegraf<BotContext>) {
       const date = parseISODate(dateISO!);
 
       await ctx.reply(
-        `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Час: ${time} (${duration} год)\n👤 Ім'я: ${customerName}\n\n📞 Крок 5: Введіть телефон клієнта\n\n👇 Напишіть телефон нижче 👇`
+        `➕ Додати бронювання\n\n📅 Дата: ${formatDate(date, settings.timeZone)}\n⏱ Час: ${time} (${duration} год)\n👤 Ім'я: ${customerName}\n\n📞 Телефон клієнта`,
+        getAdminBookingPhoneKeyboard()
       );
       return;
     }

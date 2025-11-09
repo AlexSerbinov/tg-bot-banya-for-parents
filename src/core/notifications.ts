@@ -56,12 +56,19 @@ export function getBookingPendingMessage(
   const dateTime = formatDateTime(booking.dateStart, tz);
   const duration = Math.floor(booking.durationMin / 60);
 
-  return `📝 Заявку надіслано!
+  let message = `✅ 📝 Заявку надіслано!
 
 📅 Дата: ${dateTime}
-⏱ Тривалість: ${duration} год
+⏱ Тривалість: ${duration} год`;
 
-⏳ Очікуйте підтвердження від адміністратора.`;
+  // Додаємо коментар, якщо він є
+  if (booking.note) {
+    message += `\n\n💬 Коментар: ${booking.note}`;
+  }
+
+  message += `\n\n⏳ Очікуйте підтвердження від адміністратора.`;
+
+  return message;
 }
 
 export function getContactsMessage(): string {
@@ -70,7 +77,7 @@ export function getContactsMessage(): string {
 ${config.contacts.svitlana.name}: ${config.contacts.svitlana.phone}
 ${config.contacts.stanislav.name}: ${config.contacts.stanislav.phone}
 
-Дзвоніть у будь-який час!`;
+Будемо раді вашим дзвінкам!`;
 }
 
 export function getWelcomeMessage(): string {

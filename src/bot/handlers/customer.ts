@@ -14,6 +14,8 @@ import {
   getAdminMenuKeyboard,
   getScheduleNavigationKeyboard,
   getBookingSubmittedKeyboard,
+  getBookingKeyboard,
+  getBookingKeyboardWithComment,
 } from '../keyboards';
 import {
   getNextDays,
@@ -44,14 +46,21 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
       const caption = buildScheduleCaption(schedule.days, schedule.stats, settings.timeZone);
       const keyboard = getScheduleNavigationKeyboard(0, MAX_WEEK_OFFSET);
 
-      await ctx.replyWithPhoto(
-        { source: schedule.buffer },
-        {
-          caption,
-          parse_mode: 'Markdown',
-          reply_markup: keyboard.reply_markup,
-        }
-      );
+      // Перевіряємо, чи buffer не пустий
+      if (schedule.buffer && schedule.buffer.length > 0) {
+        await ctx.replyWithPhoto(
+          { source: schedule.buffer },
+          {
+            caption,
+            parse_mode: 'Markdown',
+            reply_markup: keyboard.reply_markup,
+          }
+        );
+      } else {
+        console.warn('Schedule image buffer is empty, sending text instead');
+        const selectionDays = getNextDays(7, settings.timeZone);
+        await ctx.reply('Не вдалося згенерувати візуальний розклад.\n\nОберіть дату:', getDateSelectionKeyboard(selectionDays, 0, MAX_WEEK_OFFSET));
+      }
     } catch (error) {
       console.error('Failed to generate schedule image:', error);
       // Якщо не вдалося згенерувати картинку, показуємо список дат
@@ -192,13 +201,25 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
     const relevantSlots = slots.filter((s) => s.durationHours === duration);
 
     if (relevantSlots.length === 0) {
-      await ctx.editMessageText(
-        `❌ На жаль, немає вільних слотів на ${formatDate(
-          new Date(dateISO),
-          config.timeZone
-        )} тривалістю ${duration} год.\n\nОберіть іншу тривалість або дату.`,
-        getDurationKeyboard(dateISO, settings.allowedDurations.split(',').map(Number))
-      );
+      try {
+        await ctx.editMessageText(
+          `❌ На жаль, немає вільних слотів на ${formatDate(
+            new Date(dateISO),
+            config.timeZone
+          )} тривалістю ${duration} год.\n\nОберіть іншу тривалість або дату.`,
+          getDurationKeyboard(dateISO, settings.allowedDurations.split(',').map(Number))
+        );
+      } catch (error) {
+        // Якщо не вдалося відредагувати повідомлення (наприклад, воно вже змінене),
+        // надсилаємо нове повідомлення
+        await ctx.reply(
+          `❌ На жаль, немає вільних слотів на ${formatDate(
+            new Date(dateISO),
+            config.timeZone
+          )} тривалістю ${duration} год.\n\nОберіть іншу тривалість або дату.`,
+          getDurationKeyboard(dateISO, settings.allowedDurations.split(',').map(Number))
+        );
+      }
       await ctx.answerCbQuery();
       return;
     }
@@ -348,9 +369,9 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
 
     await ctx.editMessageText(
       getBookingPendingMessage(booking, config.timeZone),
-      getBookingSubmittedKeyboard(booking.id)
+      comment ? getBookingKeyboardWithComment(booking.id) : getBookingSubmittedKeyboard(booking.id)
     );
-    await ctx.answerCbQuery('Заявку створено!');
+    await ctx.answerCbQuery('✅ Заявку створено!');
 
     // Notify all admins
     await notifyAdmins(bot, booking);
@@ -550,10 +571,7 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
       `📅 Дата: ${formatDate(slotStart, settings.timeZone)}
 ⏱ Час: ${time} (${duration} год)
 
-💬 Бажаєте залишити коментар власникам?
-
-Якщо так - введіть його нижче.
-Якщо ні - просто підтвердіть бронювання.`,
+💬 Бажаєте залишити коментар власникам?`,
       getBookingConfirmKeyboard(dateISO, time, duration)
     );
     await ctx.answerCbQuery();
@@ -621,10 +639,7 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
 📅 Дата: ${formatDate(slotStart, settings.timeZone)}
 ⏱ Час: ${time} (${duration} год)
 
-💬 Бажаєте залишити коментар власникам?
-
-Якщо так - введіть його нижче.
-Якщо ні - просто підтвердіть бронювання.`,
+💬 Бажаєте залишити коментар власникам?`,
       getBookingConfirmKeyboard(dateISO, time, duration)
     );
   });
@@ -711,7 +726,35 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
     const tgId = ctx.from.id.toString();
     const session = getSession(tgId);
 
-    await ctx.deleteMessage();
+    // Перевіряємо, чи це повідомлення про заявку (має callback_data з EDIT_BOOKING або CANCEL_BOOKING)
+    const message = ctx.callbackQuery.message as any;
+    const isBookingMessage = message && message.reply_markup &&
+      message.reply_markup.inline_keyboard &&
+      message.reply_markup.inline_keyboard.some((row: any) =>
+        row.some((button: any) =>
+          button.callback_data &&
+          (button.callback_data.startsWith('EDIT_BOOKING:') || button.callback_data.startsWith('CANCEL_BOOKING:'))
+        )
+      );
+
+    // Якщо це повідомлення про заявку, редагуємо його, видаляючи кнопку "Головне меню"
+    if (isBookingMessage) {
+      const bookingId = message.reply_markup.inline_keyboard
+        .flat()
+        .find((button: any) => button.callback_data && button.callback_data.startsWith('EDIT_BOOKING:'))?.callback_data?.split(':')[1];
+
+      if (bookingId) {
+        // Визначаємо, чи є коментар (перевіряємо текст кнопки)
+        const hasComment = message.reply_markup.inline_keyboard
+          .flat()
+          .some((button: any) => button.text && button.text.includes('Змінити коментар'));
+
+        // Використовуємо відповідну клавіатуру
+        const keyboard = getBookingKeyboard(bookingId);
+
+        await ctx.editMessageReplyMarkup(keyboard.reply_markup);
+      }
+    }
 
     // Показуємо відповідне меню залежно від ролі
     if (session.isAdmin && !session.forceCustomerMode) {
@@ -731,7 +774,7 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
   });
 }
 
-type ScheduleStats = Record<'available' | 'booked' | 'past', number>;
+type ScheduleStats = Record<'available' | 'booked' | 'cleaning' | 'tight' | 'past', number>;
 
 async function buildWeeklySchedulePayload(
   offset: number,
@@ -786,13 +829,7 @@ function buildScheduleCaption(days: Date[], stats: ScheduleStats, tz: string): s
   const startLabel = formatDate(days[0], tz);
   const endLabel = formatDate(days[days.length - 1], tz);
 
-  return [
-    `*${startLabel} – ${endLabel}*`,
-    `🟢 Вільні слоти: ${stats.available}`,
-    `🔴 Зайнято: ${stats.booked}`,
-    '',
-    'Натисніть «📅 Обрати дату», щоб перейти до списку дат.',
-  ].join('\n');
+  return `*${startLabel} – ${endLabel}*`;
 }
 
 async function notifyAdmins(bot: Telegraf<BotContext>, booking: any) {
