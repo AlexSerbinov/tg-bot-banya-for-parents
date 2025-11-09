@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import { performance } from 'node:perf_hooks';
 import type { Settings } from '@prisma/client';
 import { BotContext, getSession, setSession } from '../middlewares';
@@ -16,6 +16,8 @@ import {
   getBookingSubmittedKeyboard,
   getBookingKeyboard,
   getBookingKeyboardWithComment,
+  getUserBookingsKeyboard,
+  getBookingManagementUserKeyboard,
 } from '../keyboards';
 import {
   getNextDays,
@@ -31,6 +33,30 @@ import { config } from '../../config';
 import { generateWeeklyScheduleImage } from '../../core/scheduleImage';
 
 const MAX_WEEK_OFFSET = 4;
+
+// Function to clean up old bookings (older than 1 hour after visit)
+export async function cleanupOldBookings() {
+  try {
+    const oneHourAgo = new Date();
+    oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+
+    const deletedBookings = await prisma.booking.deleteMany({
+      where: {
+        dateEnd: { lt: oneHourAgo },
+        status: { in: ['CONFIRMED', 'CANCELLED'] }
+      }
+    });
+
+    if (deletedBookings.count > 0) {
+      console.log(`🧹 Cleaned up ${deletedBookings.count} old bookings`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up old bookings:', error);
+  }
+}
+
+// Schedule cleanup to run every hour
+setInterval(cleanupOldBookings, 60 * 60 * 1000); // Run every hour
 
 export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
   // View available slots
@@ -723,6 +749,7 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
 
   // Back to main
   bot.action('BACK_TO_MAIN', async (ctx) => {
+    console.log('🏠 DEBUG: BACK_TO_MAIN button pressed by user:', ctx.from?.id);
     const tgId = ctx.from.id.toString();
     const session = getSession(tgId);
 
@@ -766,11 +793,468 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
     await ctx.answerCbQuery();
   });
 
+  // Back to bookings list
+  bot.action('BACK_TO_BOOKINGS', async (ctx) => {
+    console.log('🔙 DEBUG: BACK_TO_BOOKINGS button pressed by user:', ctx.from?.id);
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const bookings = await prisma.booking.findMany({
+        where: { tgCustomerId: String(tgId) },
+        orderBy: { dateStart: 'desc' },
+        take: 10,
+      });
+
+      const formattedBookings = bookings.map(booking => ({
+        id: booking.id,
+        date: formatDate(booking.dateStart, config.timeZone),
+        time: formatTime(booking.dateStart, config.timeZone),
+        status: booking.status,
+        note: booking.note,
+        duration: Math.round((booking.dateEnd.getTime() - booking.dateStart.getTime()) / (1000 * 60 * 60))
+      }));
+
+      await ctx.editMessageText('📋 **Ваші бронювання**', {
+        reply_markup: getUserBookingsKeyboard(formattedBookings).reply_markup,
+        parse_mode: 'Markdown'
+      });
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error returning to bookings:', error);
+      await ctx.editMessageText('Виникла помилка. Спробуйте пізніше.');
+      await ctx.answerCbQuery();
+    }
+  });
+
   // Back to date selection
   bot.action('BACK_TO_DATE', async (ctx) => {
     const days = getNextDays(7, config.timeZone);
     await ctx.editMessageText('Оберіть дату:', getDateSelectionKeyboard(days, 0, MAX_WEEK_OFFSET));
     await ctx.answerCbQuery();
+  });
+
+  // View user bookings
+  bot.hears('📋 Мої бронювання', async (ctx) => {
+    console.log('🔍 DEBUG: "📋 Мої бронювання" button pressed');
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const oneHourAgo = new Date();
+      oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+
+      const bookings = await prisma.booking.findMany({
+        where: {
+          tgCustomerId: String(tgId),
+          // Показуємо тільки бронювання, що ще не закінчились або закінчились менше ніж годину тому
+          dateEnd: { gte: oneHourAgo }
+        },
+        orderBy: { dateStart: 'asc' }, // Від найближчих до найдальніших
+        take: 10, // Показувати максимум 10 бронювань
+      });
+
+      if (bookings.length === 0) {
+        await ctx.reply('У вас поки що немає бронювань.\n\nВи можете створити нове бронювання через меню "📅 Переглянути вільні слоти".');
+        return;
+      }
+
+      const message = `📋 **Ваші бронювання**\n\nЗнайдено ${bookings.length} бронювань(я) (показуються актуальні та майбутні):`;
+      const formattedBookings = bookings.map(booking => ({
+        id: booking.id,
+        date: formatDate(booking.dateStart, config.timeZone),
+        time: formatTime(booking.dateStart, config.timeZone),
+        status: booking.status,
+        note: booking.note,
+        duration: Math.round((booking.dateEnd.getTime() - booking.dateStart.getTime()) / (1000 * 60 * 60))
+      }));
+
+      await ctx.reply(message, {
+        reply_markup: getUserBookingsKeyboard(formattedBookings).reply_markup,
+        parse_mode: 'Markdown'
+      });
+    } catch (error) {
+      console.error('Error fetching user bookings:', error);
+      await ctx.reply('Виникла помилка при завантаженні бронювань. Спробуйте пізніше.');
+    }
+  });
+
+  // Handle individual booking management
+  bot.action(/^MANAGE_BOOKING:(.+)$/, async (ctx) => {
+    console.log('🔍 DEBUG: MANAGE_BOOKING button pressed for booking:', ctx.match[1]);
+    const bookingId = ctx.match[1];
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+      });
+
+      if (!booking || booking.tgCustomerId !== String(tgId)) {
+        console.log('❌ Booking not found or access denied for user:', tgId);
+        await ctx.reply('Бронювання не знайдено або у вас немає доступу.');
+        return;
+      }
+
+      console.log(`📋 Showing booking details: ID=${booking.id}, Status=${booking.status}, Date=${formatDate(booking.dateStart, config.timeZone)} ${formatTime(booking.dateStart, config.timeZone)}`);
+
+      const statusText = booking.status === 'CONFIRMED' ? '✅ Підтверджено' :
+                        booking.status === 'PENDING' ? '⏳ Очікує підтвердження' :
+                        booking.status === 'CANCELLED' ? '❌ Скасовано' : '📝 Створено';
+
+      let message = `📋 **Деталі бронювання**\n\n`;
+      message += `📅 Дата: ${formatDate(booking.dateStart, config.timeZone)}\n`;
+      message += `⏰ Час: ${formatTime(booking.dateStart, config.timeZone)}\n`;
+      message += `⏱ Тривалість: ${Math.round((booking.dateEnd.getTime() - booking.dateStart.getTime()) / (1000 * 60 * 60))} год\n`;
+      message += `📊 Статус: ${statusText}\n`;
+      if (booking.note) {
+        message += `💬 Коментар: ${booking.note}\n`;
+      }
+
+      const formattedBooking = {
+        id: booking.id,
+        date: formatDate(booking.dateStart, config.timeZone),
+        time: formatTime(booking.dateStart, config.timeZone),
+        status: booking.status,
+        note: booking.note,
+        duration: Math.round((booking.dateEnd.getTime() - booking.dateStart.getTime()) / (1000 * 60 * 60))
+      };
+
+      await ctx.reply(message, {
+        reply_markup: getBookingManagementUserKeyboard(formattedBooking).reply_markup,
+        parse_mode: 'Markdown'
+      });
+    } catch (error) {
+      console.error('Error managing booking:', error);
+      await ctx.reply('Виникла помилка. Спробуйте пізніше.');
+    }
+  });
+
+  // Refresh bookings list
+  bot.action('REFRESH_BOOKINGS', async (ctx) => {
+    console.log('🔄 DEBUG: REFRESH_BOOKINGS button pressed by user:', ctx.from?.id);
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const oneHourAgo = new Date();
+      oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+
+      const bookings = await prisma.booking.findMany({
+        where: {
+          tgCustomerId: String(tgId),
+          // Показуємо тільки бронювання, що ще не закінчились або закінчились менше ніж годину тому
+          dateEnd: { gte: oneHourAgo }
+        },
+        orderBy: { dateStart: 'asc' }, // Від найближчих до найдальніших
+        take: 10, // Показувати максимум 10 бронювань
+      });
+
+      const formattedBookings = bookings.map(booking => ({
+        id: booking.id,
+        date: formatDate(booking.dateStart, config.timeZone),
+        time: formatTime(booking.dateStart, config.timeZone),
+        status: booking.status,
+        note: booking.note,
+        duration: Math.round((booking.dateEnd.getTime() - booking.dateStart.getTime()) / (1000 * 60 * 60))
+      }));
+
+      await ctx.reply('🔄 Оновлено!', {
+        reply_markup: getUserBookingsKeyboard(formattedBookings).reply_markup,
+      });
+    } catch (error) {
+      console.error('Error refreshing bookings:', error);
+      await ctx.reply('Виникла помилка при оновленні. Спробуйте пізніше.');
+    }
+  });
+
+  // Edit booking time
+  bot.action(/^EDIT_TIME:(.+)$/, async (ctx) => {
+    console.log('✏️ DEBUG: EDIT_TIME button pressed for booking:', ctx.match[1]);
+    const bookingId = ctx.match[1];
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+      });
+
+      if (!booking || booking.tgCustomerId !== String(tgId)) {
+        await ctx.reply('Бронювання не знайдено або у вас немає доступу.');
+        return;
+      }
+
+      if (booking.status === 'CANCELLED') {
+        await ctx.reply('Не можна змінити час скасованого бронювання.');
+        return;
+      }
+
+      // Redirect to date selection for rescheduling
+      const days = getNextDays(7, config.timeZone);
+      await ctx.editMessageText(
+        `📅 Оберіть нову дату для бронювання:\n\nПоточне бронювання: ${formatDate(booking.dateStart, config.timeZone)} ${formatTime(booking.dateStart, config.timeZone)}`,
+        getDateSelectionKeyboard(days, 0, MAX_WEEK_OFFSET)
+      );
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error editing booking time:', error);
+      await ctx.reply('Виникла помилка. Спробуйте пізніше.');
+    }
+  });
+
+  // Add comment to booking
+  bot.action(/^ADD_COMMENT:(.+)$/, async (ctx) => {
+    console.log('🔍 DEBUG: ADD_COMMENT button pressed for booking:', ctx.match[1]);
+    const bookingId = ctx.match[1];
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+      });
+
+      if (!booking || booking.tgCustomerId !== String(tgId)) {
+        await ctx.reply('Бронювання не знайдено або у вас немає доступу.');
+        return;
+      }
+
+      await ctx.editMessageText(
+        '💬 Введіть коментар до бронювання (максимум 200 символів):',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Скасувати', `MANAGE_BOOKING:${bookingId}`)]
+        ])
+      );
+      await ctx.answerCbQuery();
+
+      // Set up listener for comment
+      ctx.session = ctx.session || {};
+      ctx.session.awaitingComment = true;
+      ctx.session.pendingRejectionBookingId = bookingId;
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      await ctx.reply('Виникла помилка. Спробуйте пізніше.');
+    }
+  });
+
+  // Edit comment
+  bot.action(/^EDIT_COMMENT:(.+)$/, async (ctx) => {
+    console.log('🔍 DEBUG: EDIT_COMMENT button pressed for booking:', ctx.match[1]);
+    const bookingId = ctx.match[1];
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+      });
+
+      if (!booking || booking.tgCustomerId !== String(tgId)) {
+        await ctx.reply('Бронювання не знайдено або у вас немає доступу.');
+        return;
+      }
+
+      const currentComment = booking.note || '(немає коментаря)';
+      await ctx.editMessageText(
+        `💬 Редагування коментаря:\n\nПоточний коментар: ${currentComment}\n\nВведіть новий коментар (максимум 200 символів):`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Скасувати', `MANAGE_BOOKING:${bookingId}`)]
+        ])
+      );
+      await ctx.answerCbQuery();
+
+      // Set up listener for comment edit
+      ctx.session = ctx.session || {};
+      ctx.session.awaitingComment = true;
+      ctx.session.pendingRejectionBookingId = bookingId;
+    } catch (error) {
+      console.error('Error editing comment:', error);
+      await ctx.reply('Виникла помилка. Спробуйте пізніше.');
+    }
+  });
+
+  // Cancel booking
+  bot.action(/^CANCEL_BOOKING:(.+)$/, async (ctx) => {
+    console.log('🔍 DEBUG: CANCEL_BOOKING button pressed for booking:', ctx.match[1]);
+    const bookingId = ctx.match[1];
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+      });
+
+      if (!booking || booking.tgCustomerId !== String(tgId)) {
+        await ctx.reply('Бронювання не знайдено або у вас немає доступу.');
+        return;
+      }
+
+      if (booking.status === 'CANCELLED') {
+        await ctx.reply('Це бронювання вже скасовано.');
+        return;
+      }
+
+      // Update booking status to cancelled
+      await prisma.booking.update({
+        where: { id: bookingId },
+        data: { status: 'CANCELLED' }
+      });
+
+      await ctx.editMessageText(
+        '❌ Бронювання успішно скасовано.\n\nЯкщо ви хочете створити нове бронювання, використовуйте меню "📅 Переглянути вільні слота".',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Створити нову заявку', `REBOOK:${bookingId}`)],
+          [Markup.button.callback('🔙 Назад до списку', 'BACK_TO_BOOKINGS')],
+          [Markup.button.callback('🏠 Головне меню', 'BACK_TO_MAIN')]
+        ])
+      );
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error cancelling booking:', error);
+      await ctx.reply('Виникла помилка при скасуванні бронювання. Спробуйте пізніше.');
+    }
+  });
+
+  // Rebook cancelled booking
+  bot.action(/^REBOOK:(.+)$/, async (ctx) => {
+    console.log('🔄 DEBUG: REBOOK button pressed for booking:', ctx.match[1]);
+    const bookingId = ctx.match[1];
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+      });
+
+      if (!booking || booking.tgCustomerId !== String(tgId)) {
+        await ctx.reply('Бронювання не знайдено або у вас немає доступу.');
+        return;
+      }
+
+      // Redirect to date selection for new booking
+      const days = getNextDays(7, config.timeZone);
+      await ctx.editMessageText(
+        '📅 Оберіть дату для нового бронювання:',
+        getDateSelectionKeyboard(days, 0, MAX_WEEK_OFFSET)
+      );
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error rebooking:', error);
+      await ctx.reply('Виникла помилка. Спробуйте пізніше.');
+    }
+  });
+
+  // Delete cancelled booking from history
+  bot.action(/^DELETE_BOOKING:(.+)$/, async (ctx) => {
+    console.log('🗑️ DEBUG: DELETE_BOOKING button pressed for booking:', ctx.match[1]);
+    const bookingId = ctx.match[1];
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+      });
+
+      if (!booking || booking.tgCustomerId !== String(tgId)) {
+        await ctx.reply('Бронювання не знайдено або у вас немає доступу.');
+        return;
+      }
+
+      if (booking.status !== 'CANCELLED') {
+        await ctx.reply('Видалити з історії можна тільки скасовані бронювання.');
+        return;
+      }
+
+      // Delete the booking from database
+      await prisma.booking.delete({
+        where: { id: bookingId }
+      });
+
+      await ctx.editMessageText(
+        '🗑️ Бронювання успішно видалено з історії.',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Оновити список', 'REFRESH_BOOKINGS')],
+          [Markup.button.callback('🔙 Назад до списку', 'BACK_TO_BOOKINGS')],
+          [Markup.button.callback('🏠 Головне меню', 'BACK_TO_MAIN')]
+        ])
+      );
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error deleting booking:', error);
+      await ctx.reply('Виникла помилка при видаленні бронювання. Спробуйте пізніше.');
+    }
+  });
+
+  // Handle text messages for comments
+  bot.on('text', async (ctx) => {
+    const tgId = ctx.from?.id;
+    if (!tgId) return;
+
+    try {
+      const session = ctx.session as any;
+      const message = ctx.message.text;
+
+      // Handle adding new comment
+      if (session?.pendingRejectionBookingId && session?.awaitingComment) {
+        const bookingId = session.pendingRejectionBookingId;
+
+        if (message.length > 200) {
+          await ctx.reply('Коментар занадто довгий. Максимальна довжина - 200 символів.');
+          return;
+        }
+
+        await prisma.booking.update({
+          where: { id: bookingId },
+          data: { note: message }
+        });
+
+        await ctx.reply('✅ Коментар успішно додано!');
+
+        // Clear session state
+        session.pendingRejectionBookingId = undefined;
+        session.awaitingComment = false;
+
+        // Show updated booking details
+        const booking = await prisma.booking.findUnique({
+          where: { id: bookingId },
+        });
+
+        if (booking) {
+          const statusText = booking.status === 'CONFIRMED' ? '✅ Підтверджено' :
+                            booking.status === 'PENDING' ? '⏳ Очікує підтвердження' :
+                            booking.status === 'CANCELLED' ? '❌ Скасовано' : '📝 Створено';
+
+          let response = `📋 **Оновлені деталі бронювання**\n\n`;
+          response += `📅 Дата: ${formatDate(booking.dateStart, config.timeZone)}\n`;
+          response += `⏰ Час: ${formatTime(booking.dateStart, config.timeZone)}\n`;
+          response += `⏱ Тривалість: ${Math.round((booking.dateEnd.getTime() - booking.dateStart.getTime()) / (1000 * 60 * 60))} год\n`;
+          response += `📊 Статус: ${statusText}\n`;
+          response += `💬 Коментар: ${booking.note}\n`;
+
+          const formattedBooking = {
+            id: booking.id,
+            date: formatDate(booking.dateStart, config.timeZone),
+            time: formatTime(booking.dateStart, config.timeZone),
+            status: booking.status,
+            note: booking.note,
+            duration: Math.round((booking.dateEnd.getTime() - booking.dateStart.getTime()) / (1000 * 60 * 60))
+          };
+
+          await ctx.reply(response, {
+            reply_markup: getBookingManagementUserKeyboard(formattedBooking).reply_markup,
+            parse_mode: 'Markdown'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error handling text message:', error);
+      await ctx.reply('Виникла помилка. Спробуйте пізніше.');
+    }
   });
 }
 

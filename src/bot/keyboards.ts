@@ -6,7 +6,8 @@ import { Slot } from '../core/rules';
 export function getMainMenuKeyboard() {
   return Markup.keyboard([
     ['📅 Переглянути вільні слоти'],
-    ['📞 Контакти власників', '🔐 Вхід для адміністратора'],
+    ['📋 Мої бронювання', '📞 Контакти власників'],
+    ['🔐 Вхід для адміністратора'],
   ])
     .resize()
     .persistent();
@@ -372,6 +373,67 @@ export function getAdminTimeSelectionKeyboard(dateISO: string, duration: number)
     [Markup.button.callback('« Назад', `ADMIN_DATE:${dateISO}`)],
     [Markup.button.callback('❌ Скасувати', 'ADMIN_CANCEL')],
   ]);
+}
+
+// User bookings management keyboard
+export function getUserBookingsKeyboard(bookings: any[]) {
+  const buttons = bookings.map((booking) => {
+    const statusEmoji = booking.status === 'CONFIRMED' ? '✅' : booking.status === 'PENDING' ? '⏳' : '❌';
+    const label = `${statusEmoji} ${booking.date}, ${booking.time}`;
+    return [
+      Markup.button.callback(
+        label,
+        `MANAGE_BOOKING:${booking.id}`
+      ),
+    ];
+  });
+
+  const rows = [...buttons];
+  rows.push([Markup.button.callback('🔄 Оновити', 'REFRESH_BOOKINGS')]);
+  rows.push([Markup.button.callback('🏠 Головне меню', 'BACK_TO_MAIN')]);
+
+  return Markup.inlineKeyboard(rows);
+}
+
+// Individual booking management keyboard (for user)
+export function getBookingManagementUserKeyboard(booking: any) {
+  const statusEmoji = booking.status === 'CONFIRMED' ? '✅' : booking.status === 'PENDING' ? '⏳' : '❌';
+
+  // Status-based keyboard
+  if (booking.status === 'CANCELLED') {
+    return Markup.inlineKeyboard([
+      [Markup.button.callback('🔄 Створити нову заявку на цей час', `REBOOK:${booking.id}`)],
+      [Markup.button.callback('🗑️ Видалити з історії', `DELETE_BOOKING:${booking.id}`)],
+      [Markup.button.callback('🔙 Назад до списку', 'BACK_TO_BOOKINGS')],
+      [Markup.button.callback('🏠 Головне меню', 'BACK_TO_MAIN')],
+    ]);
+  }
+
+  const rows = [];
+
+  // For confirmed or pending bookings
+  rows.push([
+    Markup.button.callback('✏️ ✏️ Змінити час бронювання', `EDIT_TIME:${booking.id}`),
+  ]);
+
+  if (!booking.note) {
+    rows.push([
+      Markup.button.callback('💬 Додати коментар', `ADD_COMMENT:${booking.id}`),
+    ]);
+  } else {
+    rows.push([
+      Markup.button.callback('💬 ✏️ Змінити коментар', `EDIT_COMMENT:${booking.id}`),
+    ]);
+  }
+
+  rows.push([
+    Markup.button.callback('❌ ❌ Скасувати бронювання', `CANCEL_BOOKING:${booking.id}`),
+  ]);
+
+  rows.push([Markup.button.callback('🔙 Назад до списку', 'BACK_TO_BOOKINGS')]);
+  rows.push([Markup.button.callback('🏠 Головне меню', 'BACK_TO_MAIN')]);
+
+  return Markup.inlineKeyboard(rows);
 }
 
 export function getAdminBookingConfirmKeyboard() {

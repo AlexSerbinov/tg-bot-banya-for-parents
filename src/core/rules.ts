@@ -50,15 +50,22 @@ export function generateSlots(
       }
 
       // Check for conflicts
-      const hasConflict = relevantBookings.some((b) =>
-        overlapsWithBuffer(
+      const hasConflict = relevantBookings.some((b) => {
+        const conflict = overlapsWithBuffer(
           currentStart,
           slotEnd,
           b.dateStart,
           b.dateEnd,
           buffer
-        )
-      );
+        );
+
+        // Debug logging for conflicts
+        if (conflict) {
+          console.log(`CONFLICT: Slot ${currentStart.toISOString()}-${slotEnd.toISOString()} conflicts with booking ${b.dateStart.toISOString()}-${b.dateEnd.toISOString()} (buffer: ${buffer}min)`);
+        }
+
+        return conflict;
+      });
 
       if (!hasConflict) {
         results.push({
@@ -86,7 +93,9 @@ export function overlapsWithBuffer(
   const aEndWithBuffer = addMinutes(aEnd, bufferMin);
   const bEndWithBuffer = addMinutes(bEnd, bufferMin);
 
-  // Check if ranges overlap
+  // Check if ranges overlap including buffer BEFORE and AFTER
+  // Новий слот не може починатися раніше ніж через буфер після закінчення існуючого
+  // і не може закінчуватися пізніше ніж за буфер до початку існуючого
   return isBefore(aStart, bEndWithBuffer) && isBefore(bStart, aEndWithBuffer);
 }
 
