@@ -5,7 +5,6 @@ import { BotContext, getSession, setSession } from '../middlewares';
 import {
   getDateSelectionKeyboard,
   getDurationKeyboard,
-  getSlotsKeyboard,
   getBookingConfirmKeyboard,
   getContactsKeyboard,
   getPhoneRequestKeyboard,
@@ -18,6 +17,7 @@ import {
   getBookingKeyboardWithComment,
   getUserBookingsKeyboard,
   getBookingManagementUserKeyboard,
+  getSlotsKeyboard,
 } from '../keyboards';
 import {
   getNextDays,
@@ -26,7 +26,8 @@ import {
   toDateAtTime,
   dateToISO,
 } from '../../core/time';
-import { generateSlots } from '../../core/rules';
+// Слоти з маркером доступності чану на початку дня
+import { generateSlotsWithChan as generateSlots } from '../../core/rulesChan';
 import { getContactsMessage, getBookingPendingMessage, getWelcomeMessage, getAdminWelcomeMessage } from '../../core/notifications';
 import prisma from '../../db/prismaClient';
 import { config } from '../../config';
@@ -518,6 +519,7 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
           days,
           settings,
           bookings,
+          aggregateSlots: config.slotAggregationEnabled,
         });
         const end = performance.now();
         console.log(
@@ -573,7 +575,7 @@ export function registerCustomerHandlers(bot: Telegraf<BotContext>) {
 
     await ctx.editMessageText(
       `Вільні слоти на ${formatDate(pageDayDate, settings.timeZone)} (${duration} год):`,
-      getSlotsKeyboard(relevantSlots, dateISO, duration, settings.timeZone, page)
+      getSlotsKeyboard(relevantSlots, dateISO, duration, settings.timeZone, 0)
     );
     await ctx.answerCbQuery();
   });
@@ -1296,6 +1298,7 @@ async function buildWeeklySchedulePayload(
     days,
     settings,
     bookings,
+    aggregateSlots: config.slotAggregationEnabled,
   });
   const renderDuration = Math.round(performance.now() - renderStart);
   console.log(

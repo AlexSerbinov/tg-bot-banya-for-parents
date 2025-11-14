@@ -19,7 +19,13 @@ export function generateSlots(
   const now = new Date(); // Поточний час в UTC
 
   const stepMin = 30;
-  const buffer = settings.cleaningBufferMin;
+  // Мінімум 60 хв на прибирання незалежно від конфігу
+  const buffer = Math.max(
+    60,
+    Number.isFinite((settings as any).cleaningBufferMin)
+      ? (settings as any).cleaningBufferMin
+      : 60
+  );
   const durations = settings.allowedDurations
     .split(',')
     .map((n) => parseInt(n.trim(), 10));
@@ -27,8 +33,8 @@ export function generateSlots(
   const results: Slot[] = [];
 
   // Filter relevant bookings (PENDING or CONFIRMED)
-  const relevantBookings = bookings.filter(
-    (b) => b.status === 'PENDING' || b.status === 'CONFIRMED'
+  const relevantBookings = bookings.filter((b) =>
+    ['PENDING', 'CONFIRMED', 'COMPLETED'].includes((b as any).status)
   );
 
   for (const durationHours of durations) {

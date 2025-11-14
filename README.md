@@ -19,6 +19,7 @@ PUBLIC_CONTACT_SVITLANA_NAME=Світлана
 PUBLIC_CONTACT_SVITLANA_PHONE=+380XXXXXXXXX
 PUBLIC_CONTACT_STANISLAV_NAME=Станіслав
 PUBLIC_CONTACT_STANISLAV_PHONE=+380YYYYYYYYY
+SLOT_AGGREGATION_ENABLED=true      # true = ячейки з одного статусу з'єднуються та показують діапазон часу; false = кожен слот окремо
 ```
 
 ### 3. Ініціалізація бази даних

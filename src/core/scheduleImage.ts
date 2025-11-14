@@ -3,13 +3,17 @@ import { Booking, Settings } from '@prisma/client';
 import { addMinutes, differenceInMinutes, format, isBefore } from 'date-fns';
 import { uk } from 'date-fns/locale';
 import { dateToISO, toDateAtTime } from './time';
+import { computeChanWindowsByDay, isWithinStartOfDayChanWindow } from './chan';
 
 type SlotStatus = 'available' | 'booked' | 'cleaning' | 'tight' | 'past';
+type VisualSlotStatus = 'available' | 'booked' | 'cleaning' | 'past';
 
 interface GenerateImageArgs {
   days: Date[];
   settings: Settings;
   bookings: Booking[];
+  aggregateSlots?: boolean;
+  bookedAsUnavailable?: boolean;
 }
 
 export interface WeeklyScheduleImageResult {
@@ -17,10 +21,21 @@ export interface WeeklyScheduleImageResult {
   stats: Record<SlotStatus, number>;
 }
 
+interface SlotCell {
+  rawStatus: SlotStatus;
+  visualStatus: VisualSlotStatus;
+  chanAvailable?: boolean;
+  rowIndex: number;
+  slotStart: Date;
+  slotEnd: Date;
+}
+
 const CANVAS_WIDTH = 1080;
 const HEADER_HEIGHT = 132;
+const HEADER_BOTTOM_MARGIN = 16;
 const LEGEND_HEIGHT = 68;
-const LEGEND_BOTTOM_MARGIN = 24;
+const LEGEND_BOTTOM_MARGIN = 32;
+const GRID_TOP_PADDING = 24;
 const LEFT_MARGIN = 36;
 const RIGHT_MARGIN = 36;
 const ROW_LABEL_WIDTH = 120;
@@ -33,6 +48,8 @@ export function generateWeeklyScheduleImage({
   days,
   settings,
   bookings,
+  aggregateSlots = true,
+  bookedAsUnavailable = false,
 }: GenerateImageArgs): WeeklyScheduleImageResult {
   console.log('🎨 Starting schedule image generation... [UPDATED VERSION v2.0]');
 
@@ -45,7 +62,9 @@ export function generateWeeklyScheduleImage({
     throw new Error('Робочі години закороткі для побудови розкладу');
   }
 
-  const gridTop = HEADER_HEIGHT + LEGEND_HEIGHT + LEGEND_BOTTOM_MARGIN;
+  const legendTop = HEADER_HEIGHT + HEADER_BOTTOM_MARGIN;
+  const gridTop =
+    legendTop + LEGEND_HEIGHT + LEGEND_BOTTOM_MARGIN + GRID_TOP_PADDING;
   const gridHeight =
     hourLabels.length * ROW_HEIGHT + Math.max(0, hourLabels.length - 1) * ROW_GAP;
   const canvasHeight = gridTop + gridHeight + BOTTOM_PADDING;
@@ -54,12 +73,14 @@ export function generateWeeklyScheduleImage({
   const ctx = canvas.getContext('2d');
 
   drawBackground(ctx, CANVAS_WIDTH, canvasHeight);
-  drawHeader(ctx, days);
-  drawLegend(ctx);
+  drawHeader(ctx, days, settings);
+  drawLegend(ctx, legendTop);
 
   const layout = computeGridLayout(days.length);
   drawDayHeaders(ctx, days, layout, gridTop);
   drawRowLabels(ctx, hourLabels, layout, gridTop);
+
+  const daySlots: SlotCell[][] = days.map(() => []);
 
   const stats: Record<SlotStatus, number> = {
     available: 0,
@@ -84,6 +105,13 @@ export function generateWeeklyScheduleImage({
     minDurationMinutes
   );
 
+  // Розрахунок вікон для ЧАНУ (позначаємо лише startOfDay вікна як «Вільно + Чан»)
+  const chanWindowsByDay = computeChanWindowsByDay(
+    dayDescriptors,
+    bookings,
+    settings
+  );
+
   const now = new Date();
 
   dayDescriptors.forEach((day, columnIndex) => {
@@ -98,14 +126,78 @@ export function generateWeeklyScheduleImage({
         dayTightRanges
       );
 
+      const slotStart = toDateAtTime(day.iso, timeLabel, settings.timeZone);
+      const slotEnd = addMinutes(slotStart, 60);
+      const visualStatus = getVisualStatus(status, { bookedAsUnavailable });
+      const chanAvailable =
+        status === 'available' &&
+        isWithinStartOfDayChanWindow(day.iso, slotStart, slotEnd, chanWindowsByDay);
+
       stats[status] += 1;
 
-      const cellX =
-        layout.gridX + columnIndex * (layout.columnWidth + layout.columnGap);
-      const cellY = gridTop + rowIndex * (ROW_HEIGHT + ROW_GAP);
+      daySlots[columnIndex].push({
+        rawStatus: status,
+        visualStatus,
+        chanAvailable,
+        rowIndex,
+        slotStart,
+        slotEnd,
+      });
+    });
+  });
 
-      drawSlotCell(ctx, cellX, cellY, layout.columnWidth, ROW_HEIGHT, status);
-      drawSlotLabel(ctx, cellX, cellY, layout.columnWidth, ROW_HEIGHT, status);
+  const shouldAggregateSlots = aggregateSlots;
+
+  daySlots.forEach((slots, columnIndex) => {
+    const columnX =
+      layout.gridX + columnIndex * (layout.columnWidth + layout.columnGap);
+
+    if (!shouldAggregateSlots) {
+      slots.forEach((slot) => {
+        const cellY = gridTop + slot.rowIndex * (ROW_HEIGHT + ROW_GAP);
+        drawSlotCell(ctx, columnX, cellY, layout.columnWidth, ROW_HEIGHT, slot.visualStatus);
+        drawSlotLabel(
+          ctx,
+          columnX,
+          cellY,
+          layout.columnWidth,
+          ROW_HEIGHT,
+          slot.visualStatus,
+          slot.chanAvailable
+        );
+      });
+      return;
+    }
+
+    const segments = buildSegments(slots);
+    segments.forEach((segment) => {
+      const rowCount = segment.endRow - segment.startRow;
+      const cellY = gridTop + segment.startRow * (ROW_HEIGHT + ROW_GAP);
+      const segmentHeight =
+        rowCount * ROW_HEIGHT + Math.max(0, rowCount - 1) * ROW_GAP;
+      const rangeLines =
+        rowCount > 1
+          ? buildSegmentRangeLines(segment.slotStart, segment.slotEnd)
+          : undefined;
+
+      drawSlotCell(
+        ctx,
+        columnX,
+        cellY,
+        layout.columnWidth,
+        segmentHeight,
+        segment.visualStatus
+      );
+      drawSlotLabel(
+        ctx,
+        columnX,
+        cellY,
+        layout.columnWidth,
+        segmentHeight,
+        segment.visualStatus,
+        segment.chanAvailable,
+        rangeLines
+      );
     });
   });
 
@@ -128,7 +220,7 @@ function drawBackground(ctx: CanvasCtx, width: number, height: number) {
   ctx.fillRect(0, 0, width, HEADER_HEIGHT);
 }
 
-function drawHeader(ctx: CanvasCtx, days: Date[]) {
+function drawHeader(ctx: CanvasCtx, days: Date[], settings: Settings) {
   ctx.fillStyle = '#f8fafc';
   ctx.font = '700 48px "Arial"';
   ctx.textAlign = 'left';
@@ -139,13 +231,18 @@ function drawHeader(ctx: CanvasCtx, days: Date[]) {
   ctx.font = '600 30px "Arial"';
   ctx.fillStyle = '#93c5fd';
   ctx.fillText(rangeLabel, LEFT_MARGIN, 84);
+
+  const workingHoursLabel = `Робочий день: ${settings.dayOpenTime} – ${settings.dayCloseTime}`;
+  ctx.font = '600 22px "Arial"';
+  ctx.fillStyle = '#cbd5f5';
+  ctx.fillText(workingHoursLabel, LEFT_MARGIN, 118);
 }
 
-function drawLegend(ctx: CanvasCtx) {
+function drawLegend(ctx: CanvasCtx, top: number) {
   const legendItems: { color: string; label: string }[] = [
-    { color: '#22c55e', label: 'Вільно' },
+    { color: '#22c55e', label: 'Вільно без Чану' },
+    { color: '#22c55e', label: 'Вільно з Чаном' },
     { color: '#f87171', label: 'Зайнято' },
-    { color: '#fde047', label: '🧹 Прибирання' },
     { color: '#94a3b8', label: 'Недоступно' },
     { color: '#475569', label: 'Минуло' },
   ];
@@ -155,7 +252,7 @@ function drawLegend(ctx: CanvasCtx) {
   ctx.font = '600 24px "Arial"';
 
   let currentX = LEFT_MARGIN;
-  const centerY = HEADER_HEIGHT + LEGEND_HEIGHT / 2 - 4;
+  const centerY = top + LEGEND_HEIGHT / 2 - 4;
 
   legendItems.forEach((item) => {
     ctx.fillStyle = item.color;
@@ -188,8 +285,8 @@ function drawDayHeaders(
   layout: { gridX: number; columnWidth: number; columnGap: number },
   gridTop: number
 ) {
-  const headersY = gridTop - 42;
-  const datesY = gridTop - 14;
+  const headersY = gridTop - 48;
+  const datesY = gridTop - 20;
 
   days.forEach((day, index) => {
     const centerX =
@@ -234,13 +331,12 @@ function drawSlotCell(
   y: number,
   width: number,
   height: number,
-  status: SlotStatus
+  status: VisualSlotStatus
 ) {
-  const colors: Record<SlotStatus, string> = {
+  const colors: Record<VisualSlotStatus, string> = {
     available: '#1ea672',
     booked: '#ef4444',
-    cleaning: '#facc15', // Жовтий - прибирання (тільки після візитів)
-    tight: '#94a3b8',    // Сірий - недоступно (мало часу для запису)
+    cleaning: '#94a3b8',
     past: '#334155',
   };
 
@@ -276,62 +372,149 @@ function drawSlotLabel(
   y: number,
   width: number,
   height: number,
-  status: SlotStatus
+  status: VisualSlotStatus,
+  chanAvailable?: boolean,
+  rangeLines?: string[]
 ) {
-  const labels: Record<SlotStatus, SlotLabelMeta> = {
-    available: { text: 'Вільно', color: '#052e16' },
-    booked: { text: 'Зайнято', color: '#fee2e2' },
-    cleaning: {
-      text: ['🧹', 'Прибирання'],
-      color: '#422006',
-      font: '700 20px "Arial"',
+  const labels: Record<VisualSlotStatus, SlotLabelMeta> = {
+    available: {
+      text: chanAvailable ? ['Вільно', 'з Чаном'] : ['Вільно', 'без Чану'],
+      color: '#052e16',
       lineHeight: 20,
     },
-    tight: { text: 'Недоступно', color: '#0f172a', font: '700 17px "Arial"' }, // Сірий - мало часу для запису
+    booked: { text: 'Зайнято', color: '#fee2e2' },
+    cleaning: { text: 'Недоступно', color: '#0f172a', font: '700 17px "Arial"' },
     past: { text: '', color: '#e2e8f0' },
   };
 
   const label = labels[status];
+  if (!label) {
+    return;
+  }
+
   let font = label.font ?? '700 22px "Arial"';
-  ctx.font = font;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = label.color;
 
-  const lines = Array.isArray(label.text) ? label.text : [label.text];
-  if (!lines[0]) {
-    return; // нічого не пишемо (наприклад, для минулих слотів)
-  }
-  if (lines.length === 1) {
-    // Піджимаємо «Недоступно», якщо не влазить
-    if (status === 'tight') {
-      let maxWidth = width - 24;
-      let iterations = 0;
-
-      while (iterations < 15) { // Збільшив ліміт ітерацій для кращого підбору розміру
-        const measuredWidth = ctx.measureText(lines[0]).width;
-        if (measuredWidth <= maxWidth) break;
-
-        const currentSize = parseInt(font.match(/(\d+)px/ )?.[1] || '17', 10);
-        if (currentSize <= 12) break; // Зменшив мінімальний розмір шрифту до 12px
-
-        font = font.replace(/\d+px/, `${currentSize - 1}px`);
-        ctx.font = font;
-        iterations++;
-      }
-    }
-    ctx.fillText(lines[0], x + width / 2, y + height / 2 + 2);
+  const baseLines = Array.isArray(label.text) ? [...label.text] : [label.text];
+  if (!baseLines[0]) {
     return;
   }
 
-  const lineHeight = label.lineHeight ?? 22;
-  const totalHeight = lineHeight * lines.length;
-  const startY = y + height / 2 - totalHeight / 2;
+  if (status === 'cleaning' && baseLines.length === 1) {
+    ctx.font = font;
+    const maxWidth = width - 24;
+    let iterations = 0;
+    let measuredWidth = ctx.measureText(baseLines[0]).width;
 
-  lines.forEach((line, index) => {
-    const lineCenter = startY + index * lineHeight + lineHeight / 2;
+    while (measuredWidth > maxWidth && iterations < 15) {
+      const currentSize = parseInt(font.match(/(\d+)px/)?.[1] || '17', 10);
+      if (currentSize <= 12) break;
+
+      font = font.replace(/\d+px/, `${currentSize - 1}px`);
+      ctx.font = font;
+      measuredWidth = ctx.measureText(baseLines[0]).width;
+      iterations += 1;
+    }
+  }
+
+  ctx.font = font;
+  const baseLineHeight = label.lineHeight ?? 22;
+  const rangeLineCount = rangeLines?.length ?? 0;
+  const rangeLineHeight = rangeLineCount > 0 ? 18 : 0;
+  const totalHeight = baseLineHeight * baseLines.length + rangeLineHeight * rangeLineCount;
+  let currentY = y + height / 2 - totalHeight / 2;
+
+  baseLines.forEach((line) => {
+    const lineCenter = currentY + baseLineHeight / 2;
     ctx.fillText(line, x + width / 2, lineCenter);
+    currentY += baseLineHeight;
   });
+
+  if (rangeLineCount) {
+    const rangeFont = '600 18px "Arial"';
+    ctx.font = rangeFont;
+    rangeLines?.forEach((line) => {
+      const lineCenter = currentY + rangeLineHeight / 2;
+      ctx.fillText(line, x + width / 2, lineCenter);
+      currentY += rangeLineHeight;
+    });
+  }
+}
+
+interface SlotSegment {
+  visualStatus: VisualSlotStatus;
+  chanAvailable?: boolean;
+  startRow: number;
+  endRow: number;
+  slotStart: Date;
+  slotEnd: Date;
+}
+
+function buildSegments(cells: SlotCell[]): SlotSegment[] {
+  const segments: SlotSegment[] = [];
+  let current: SlotSegment | null = null;
+
+  cells.forEach((cell) => {
+    if (
+      current &&
+      current.visualStatus === cell.visualStatus &&
+      current.chanAvailable === cell.chanAvailable
+    ) {
+      current.endRow = cell.rowIndex + 1;
+      current.slotEnd = cell.slotEnd;
+      return;
+    }
+
+    if (current) {
+      segments.push(current);
+    }
+
+    current = {
+      visualStatus: cell.visualStatus,
+      chanAvailable: cell.chanAvailable,
+      startRow: cell.rowIndex,
+      endRow: cell.rowIndex + 1,
+      slotStart: cell.slotStart,
+      slotEnd: cell.slotEnd,
+    };
+  });
+
+  if (current) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+function buildSegmentRangeLines(start: Date, end: Date): string[] {
+  const startLabel = formatCompactTime(start);
+  const endLabel = formatCompactTime(end);
+  return [startLabel, '–', endLabel];
+}
+
+function formatCompactTime(date: Date): string {
+  return format(date, 'HH:mm', { locale: uk });
+}
+
+function getVisualStatus(
+  status: SlotStatus,
+  options: { bookedAsUnavailable: boolean }
+): VisualSlotStatus {
+  if (status === 'available') {
+    return 'available';
+  }
+
+  if (status === 'past') {
+    return 'past';
+  }
+
+  if (status === 'booked') {
+    return options.bookedAsUnavailable ? 'cleaning' : 'booked';
+  }
+
+  return 'cleaning';
 }
 
 function resolveSlotStatus(
@@ -357,21 +540,21 @@ function resolveSlotStatus(
     return 'booked';
   }
 
-  const bufferMin = settings.cleaningBufferMin;
+  // Гарантуємо мінімум 60 хв на прибирання незалежно від налаштувань
+  const bufferMin = Math.max(
+    60,
+    Number.isFinite((settings as any).cleaningBufferMin)
+      ? (settings as any).cleaningBufferMin
+      : 60
+  );
   if (bufferMin > 0) {
     // Прибирання ТІЛЬКИ після попереднього візиту (1 година) - ПРІОРИТЕТ!
+    // Будуємо діапазони прибирання [booking.end, booking.end + bufferMin)
+    // і перевіряємо накладення зі слот-годиною.
     const touchesBuffer = bookings.some((booking) => {
-      if (rangesOverlap(slotStart, slotEnd, booking.dateStart, booking.dateEnd)) {
-        return false;
-      }
-
-      const minutesSinceBookingEnded = differenceInMinutes(
-        slotStart,
-        booking.dateEnd
-      );
-
-      // Тільки після попереднього візиту, не перед наступним!
-      return minutesSinceBookingEnded > 0 && minutesSinceBookingEnded <= bufferMin;
+      const cleanStart = booking.dateEnd;
+      const cleanEnd = addMinutes(booking.dateEnd, bufferMin);
+      return rangesOverlap(slotStart, slotEnd, cleanStart, cleanEnd);
     });
 
     if (touchesBuffer) {
