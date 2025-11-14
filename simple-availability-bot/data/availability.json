@@ -1,0 +1,47 @@
+[
+  {
+    "id": "b2f1603508",
+    "dateISO": "2025-11-14",
+    "startTime": "09:00",
+    "endTime": "15:00",
+    "durationMinutes": 360,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-14T21:58:11.807Z"
+  },
+  {
+    "id": "1dd9b4b468",
+    "dateISO": "2025-11-16",
+    "startTime": "10:00",
+    "endTime": "19:00",
+    "durationMinutes": 540,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-14T21:58:56.739Z"
+  },
+  {
+    "id": "753fe59438",
+    "dateISO": "2025-11-18",
+    "startTime": "11:00",
+    "endTime": "20:00",
+    "durationMinutes": 540,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-14T22:57:33.165Z"
+  },
+  {
+    "id": "4b092d9f18",
+    "dateISO": "2025-11-19",
+    "startTime": "09:00",
+    "endTime": "11:00",
+    "durationMinutes": 120,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-14T22:58:00.056Z"
+  },
+  {
+    "id": "01d6b0ebb8",
+    "dateISO": "2025-11-19",
+    "startTime": "12:00",
+    "endTime": "14:00",
+    "durationMinutes": 120,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-14T22:59:20.155Z"
+  }
+]

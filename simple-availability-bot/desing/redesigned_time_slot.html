@@ -1,0 +1,273 @@
+<html lang="uk"><head>
+    <meta charset="UTF-8">
+    <title>Вільні години бані</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/lucide-static/font/lucide.css">
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-50 antialiased">
+    <div class="min-h-screen flex items-center justify-center px-4 py-6">
+      <div class="w-full max-w-5xl bg-slate-900/80 border border-slate-700/70 rounded-3xl shadow-[0_24px_80px_rgba(15,23,42,0.85)] overflow-hidden">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-6 sm:px-8 pt-6 pb-4 bg-gradient-to-r from-slate-900 via-slate-900 to-slate-900/40">
+          <div class="space-y-1">
+            <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-50">
+              Вільні години бані
+            </h1>
+            <p class="text-sm sm:text-base text-slate-300">
+              Період: <span class="font-medium text-white">15&nbsp;– 21 листопада</span>
+            </p>
+            <p class="text-xs sm:text-sm text-slate-400">
+              Графік роботи: <span class="font-medium text-slate-100">09:00 – 23:00</span>
+            </p>
+          </div>
+
+          <!-- Date selector (static mock for the visual) -->
+          <div class="inline-flex items-center gap-2 rounded-2xl border border-slate-700/70 bg-slate-900/80 px-3 py-2">
+            <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-300">
+              <i class="lucide lucide-calendar-range text-[18px]"></i>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-xs uppercase tracking-[0.12em] text-slate-400">
+                Поточний тиждень
+              </span>
+              <span class="text-sm font-medium text-slate-50">
+                15 – 21 листопада
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Legend and hint -->
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-6 sm:px-8 pt-4 pb-3 bg-slate-900">
+          <div class="flex flex-wrap items-center gap-4 text-xs sm:text-sm">
+            <div class="flex items-center gap-2">
+              <span class="inline-flex h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-emerald-400/40"></span>
+              <span class="text-slate-200">Вільно</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex h-3 w-3 rounded-full bg-rose-500 ring-2 ring-rose-400/40"></span>
+              <span class="text-slate-200">Зайнято</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex h-3 w-3 rounded-full bg-slate-600 ring-2 ring-slate-500/40"></span>
+              <span class="text-slate-200">Минуло</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 text-xs sm:text-sm text-slate-300">
+            <i class="lucide lucide-info text-[16px] text-slate-400"></i>
+          </div>
+        </div>
+
+        <!-- Main content -->
+        <div class="px-4 sm:px-6 md:px-8 pb-6 pt-3 bg-gradient-to-b from-slate-900 to-slate-950">
+          <div class="grid grid-cols-[auto,1fr] gap-3 sm:gap-4 max-h-[520px] sm:max-h-[560px]">
+            <!-- Time column -->
+            <div class="flex flex-col text-[10px] sm:text-xs text-slate-400 pt-10 pr-2">
+              <div class="h-[24px] sm:h-[28px]"></div>
+              <!-- Time labels -->
+              <div class="flex flex-col gap-[10px] sm:gap-[12px]">
+                <span class="h-6 flex items-start">09:00</span>
+                <span class="h-6 flex items-start">10:00</span>
+                <span class="h-6 flex items-start">11:00</span>
+                <span class="h-6 flex items-start">12:00</span>
+                <span class="h-6 flex items-start">13:00</span>
+                <span class="h-6 flex items-start">14:00</span>
+                <span class="h-6 flex items-start">15:00</span>
+                <span class="h-6 flex items-start">16:00</span>
+                <span class="h-6 flex items-start">17:00</span>
+                <span class="h-6 flex items-start">18:00</span>
+                <span class="h-6 flex items-start">19:00</span>
+                <span class="h-6 flex items-start">20:00</span>
+                <span class="h-6 flex items-start">21:00</span>
+                <span class="h-6 flex items-start">22:00</span>
+              </div>
+            </div>
+
+            <!-- Schedule scroll area -->
+            <div class="overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-800/80 bg-slate-900/90">
+              <div class="min-w-[640px]">
+                <!-- Day headers -->
+                <div class="grid grid-cols-7 gap-1 border-b border-slate-800 bg-slate-900/95">
+                  <!-- Each day -->
+                  <div class="py-3 px-2 text-center text-[10px] sm:text-xs text-slate-300">
+                    <div class="uppercase tracking-[0.16em] text-slate-500">
+                      суб
+                    </div>
+                    <div class="mt-1 font-medium text-slate-100">
+                      15 листоп.
+                    </div>
+                  </div>
+                  <div class="py-3 px-2 text-center text-[10px] sm:text-xs text-slate-300">
+                    <div class="uppercase tracking-[0.16em] text-slate-500">
+                      нед
+                    </div>
+                    <div class="mt-1 font-medium text-slate-100">
+                      16 листоп.
+                    </div>
+                  </div>
+                  <div class="py-3 px-2 text-center text-[10px] sm:text-xs text-slate-300">
+                    <div class="uppercase tracking-[0.16em] text-slate-500">
+                      пон
+                    </div>
+                    <div class="mt-1 font-medium text-slate-100">
+                      17 листоп.
+                    </div>
+                  </div>
+                  <div class="py-3 px-2 text-center text-[10px] sm:text-xs text-slate-300">
+                    <div class="uppercase tracking-[0.16em] text-slate-500">
+                      вів
+                    </div>
+                    <div class="mt-1 font-medium text-slate-100">
+                      18 листоп.
+                    </div>
+                  </div>
+                  <div class="py-3 px-2 text-center text-[10px] sm:text-xs text-slate-300">
+                    <div class="uppercase tracking-[0.16em] text-slate-500">
+                      сер
+                    </div>
+                    <div class="mt-1 font-medium text-slate-100">
+                      19 листоп.
+                    </div>
+                  </div>
+                  <div class="py-3 px-2 text-center text-[10px] sm:text-xs text-slate-300">
+                    <div class="uppercase tracking-[0.16em] text-slate-500">
+                      чтв
+                    </div>
+                    <div class="mt-1 font-medium text-slate-100">
+                      20 листоп.
+                    </div>
+                  </div>
+                  <div class="py-3 px-2 text-center text-[10px] sm:text-xs text-slate-300">
+                    <div class="uppercase tracking-[0.16em] text-slate-500">
+                      птн
+                    </div>
+                    <div class="mt-1 font-medium text-slate-100">
+                      21 листоп.
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Columns with slots -->
+                <div class="grid grid-cols-7 gap-1 px-2 py-3">
+                  <!-- Day 1: fully booked -->
+                  <div class="relative">
+                    <div class="h-[420px] rounded-2xl bg-rose-500/90 flex items-center justify-center px-2">
+                      <div class="text-center text-[11px] sm:text-xs">
+                        <div class="font-medium text-slate-50">
+                          09:00 – 23:00
+                        </div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-rose-100">
+                          Зайнято
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Day 2: one big free block, rest past/empty -->
+                  <div class="relative">
+                    <!-- Past morning (example) -->
+                    <div class="absolute inset-x-0 top-0 h-[40px] rounded-2xl bg-slate-800/70"></div>
+
+                    <!-- Free block -->
+                    <button class="absolute inset-x-0 top-[0px] h-[335px] rounded-2xl bg-emerald-500 hover:bg-emerald-400 transition-colors shadow-[0_14px_40px_rgba(16,185,129,0.55)] flex flex-col items-center justify-center px-2 text-center">
+                      <span class="text-[11px] sm:text-xs font-medium text-emerald-950">
+                        10:00 – 19:00
+                      </span>
+                      <span class="mt-1 text-xs sm:text-sm font-semibold text-emerald-950">
+                        Вільно
+                      </span>
+                    </button>
+
+                    <!-- Evening booked -->
+                    <div class="absolute inset-x-0 bottom-0 h-[80px] rounded-2xl bg-rose-500/90 flex items-center justify-center px-2 text-center text-[11px] sm:text-xs">
+                      <div>
+                        <div class="font-medium text-rose-50">
+                          19:00 – 23:00
+                        </div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-rose-100">
+                          Зайнято
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Day 3–7: booked -->
+                  <div class="relative">
+                    <div class="h-[420px] rounded-2xl bg-rose-500/90 flex items-center justify-center px-2">
+                      <div class="text-center text-[11px] sm:text-xs">
+                        <div class="font-medium text-slate-50">
+                          09:00 – 23:00
+                        </div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-rose-100">
+                          Зайнято
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="relative">
+                    <div class="h-[420px] rounded-2xl bg-rose-500/90 flex items-center justify-center px-2">
+                      <div class="text-center text-[11px] sm:text-xs">
+                        <div class="font-medium text-slate-50">
+                          09:00 – 23:00
+                        </div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-rose-100">
+                          Зайнято
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="relative">
+                    <div class="h-[420px] rounded-2xl bg-rose-500/90 flex items-center justify-center px-2">
+                      <div class="text-center text-[11px] sm:text-xs">
+                        <div class="font-medium text-slate-50">
+                          09:00 – 23:00
+                        </div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-rose-100">
+                          Зайнято
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="relative">
+                    <div class="h-[420px] rounded-2xl bg-rose-500/90 flex items-center justify-center px-2">
+                      <div class="text-center text-[11px] sm:text-xs">
+                        <div class="font-medium text-slate-50">
+                          09:00 – 23:00
+                        </div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-rose-100">
+                          Зайнято
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="relative">
+                    <div class="h-[420px] rounded-2xl bg-rose-500/90 flex items-center justify-center px-2">
+                      <div class="text-center text-[11px] sm:text-xs">
+                        <div class="font-medium text-slate-50">
+                          09:00 – 23:00
+                        </div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-rose-100">
+                          Зайнято
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom CTA -->
+          <div class="mt-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs sm:text-sm text-slate-300">
+            <div class="flex items-center gap-2">
+              <i class="lucide lucide-sparkles text-[16px] text-emerald-400"></i>
+              
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  
+</body></html>

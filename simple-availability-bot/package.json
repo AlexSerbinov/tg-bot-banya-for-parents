@@ -1,0 +1,32 @@
+{
+  "name": "simple-availability-bot",
+  "version": "0.1.0",
+  "description": "Спрощений Telegram-бот для керування вільними слотами бані",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "telegram",
+    "telegraf",
+    "schedule",
+    "banya"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.82",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
+    "dotenv": "^17.2.3",
+    "nanoid": "^5.1.6",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  }
+}
