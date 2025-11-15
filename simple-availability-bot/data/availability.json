@@ -8,5 +8,45 @@
     "createdBy": 350985285,
     "createdAt": "2025-11-15T18:00:47.591Z",
     "chanAvailable": true
+  },
+  {
+    "id": "044fe84c8d",
+    "dateISO": "2025-11-17",
+    "startTime": "15:30",
+    "endTime": "21:00",
+    "durationMinutes": 330,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-15T19:12:37.206Z",
+    "chanAvailable": true
+  },
+  {
+    "id": "f7da5ab3e7",
+    "dateISO": "2025-11-19",
+    "startTime": "18:30",
+    "endTime": "22:30",
+    "durationMinutes": 240,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-15T19:12:48.277Z",
+    "chanAvailable": false
+  },
+  {
+    "id": "47d274590a",
+    "dateISO": "2025-11-16",
+    "startTime": "09:00",
+    "endTime": "11:30",
+    "durationMinutes": 150,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-15T19:07:18.259Z",
+    "chanAvailable": false
+  },
+  {
+    "id": "a8a0ca9d53",
+    "dateISO": "2025-11-16",
+    "startTime": "12:00",
+    "endTime": "20:00",
+    "durationMinutes": 480,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-15T19:39:30.543Z",
+    "chanAvailable": false
   }
 ]

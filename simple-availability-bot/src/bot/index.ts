@@ -20,7 +20,7 @@ const ADMIN_MENU = [
 ];
 
 const CLIENT_MENU = [
-  ['🗓 Показати розклад', 'ℹ️ Інформація'],
+  ['🖼 Показати розклад', 'ℹ️ Інформація'],
   ['📞 Контакти'],
 ];
 
@@ -141,10 +141,7 @@ export function createBot(
     await ctx.answerCbQuery();
     const currentText = await settingsStore.getClientInfoText();
     await ctx.editMessageText(
-      '📄 Інформаційний текст для клієнтів:\n\n' +
-      '━━━━━━━━━━━━━━\n' +
-      currentText + '\n' +
-      '━━━━━━━━━━━━━━',
+      currentText + '\n',
       Markup.inlineKeyboard([
         [Markup.button.callback('✏️ Редагувати текст', 'settings:edit:clientinfo')],
         [Markup.button.callback('⬅️ Вийти в головне меню', 'settings:back')]
@@ -173,10 +170,7 @@ export function createBot(
     await ctx.answerCbQuery();
     const currentText = await settingsStore.getClientInfoText();
     await ctx.reply(
-      '📄 Інформаційний текст для клієнтів:\n\n' +
-      '━━━━━━━━━━━━━━\n' +
-      currentText + '\n' +
-      '━━━━━━━━━━━━━━',
+      currentText + '\n',
       Markup.inlineKeyboard([
         [Markup.button.callback('✏️ Редагувати текст', 'settings:edit:clientinfo')],
         [Markup.button.callback('⬅️ Вийти в головне меню', 'settings:back')]
@@ -243,6 +237,12 @@ export function createBot(
   bot.action('slot:add:done', onlyAdminAction(config, async (ctx) => {
     await ctx.answerCbQuery();
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+  }));
+
+  bot.action('slot:add:another', onlyAdminAction(config, async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    await ctx.scene.enter(ADD_SLOT_SCENE_ID);
   }));
 
   bot.action('admin:show:all:slots', onlyAdminAction(config, async (ctx) => {

@@ -12,13 +12,13 @@ const HEADER_HEIGHT = 176;
 const HEADER_BOTTOM_MARGIN = 28;
 const LEGEND_HEIGHT = 64;
 const LEGEND_BOTTOM_MARGIN = 32;
-const LEFT_MARGIN = 32;
+const LEFT_MARGIN = 52;
 const RIGHT_MARGIN = 72;
 const ROW_LABEL_WIDTH = 80;
-const COLUMN_GAP = 18;
-const BASE_ROW_HEIGHT = 36;
-const BASE_ROW_GAP = 12;
-const BOARD_PADDING_LEFT = 32;
+const COLUMN_GAP = 18; // ширина проміжку між колонками днів
+const BASE_ROW_HEIGHT = 54; // висота однієї клітинки в рядку (збільшено з 36 до 54)
+const BASE_ROW_GAP = 16; // пухлість - зменшено з 24 до 16 для компактності
+const BOARD_PADDING_LEFT = 2; // відступи всередині борду
 const BOARD_PADDING_RIGHT = 32;
 const BOARD_PADDING_TOP = 32;
 const BOARD_PADDING_BOTTOM = 40;
@@ -26,7 +26,8 @@ const DAY_HEADER_HEIGHT = 70;
 const BOTTOM_PADDING = 72;
 const GRID_MINUTE_STEP = 30;
 
-type SlotStatus = 'available' | 'booked' | 'past';
+
+type SlotStatus = 'available' | 'available_with_chan' | 'booked';
 
 interface TimeTick {
   timeString: string;
@@ -95,8 +96,8 @@ export function generateAvailabilityImage({
   logStep('group availability', groupingStart);
   const stats: Record<SlotStatus, number> = {
     available: 0,
+    available_with_chan: 0,
     booked: 0,
-    past: 0,
   };
 
   const now = new Date();
@@ -122,12 +123,15 @@ export function generateAvailabilityImage({
         (entry) => slotStart >= entry.start && slotEnd <= entry.end
       );
 
+      // Для зайнятих слотів не встановлюємо chanAvailable, щоб вони об'єднувалися
+      const chanAvailable = status === 'booked' ? undefined : slotInfo?.chanAvailable;
+
       dayCells[columnIndex].push({
         status,
         rowIndex,
         slotStart,
         slotEnd,
-        chanAvailable: slotInfo?.chanAvailable,
+        chanAvailable,
       });
     });
   });
@@ -144,9 +148,6 @@ export function generateAvailabilityImage({
         const cellY = layout.gridY + cell.rowIndex * (layout.rowHeight + layout.rowGap);
         drawSlotCell(ctx, columnX, cellY, layout.columnWidth, layout.rowHeight, cell.status);
         const lines = [buildRangeLabel(cell.slotStart, cell.slotEnd, timeZone)];
-        if (cell.status === 'available') {
-          lines.push(cell.chanAvailable === false ? 'Чан недоступний' : 'Чан доступний');
-        }
         const showStatus = getDurationMinutes(cell.slotStart, cell.slotEnd) > 60;
         drawSlotLabel(
           ctx,
@@ -156,7 +157,8 @@ export function generateAvailabilityImage({
           layout.rowHeight,
           cell.status,
           lines,
-          showStatus
+          showStatus,
+          cell.chanAvailable
         );
       });
       return;
@@ -170,9 +172,6 @@ export function generateAvailabilityImage({
         rowCount * layout.rowHeight + Math.max(0, rowCount - 1) * layout.rowGap;
       drawSlotCell(ctx, columnX, cellY, layout.columnWidth, segmentHeight, segment.status);
       const lines = [buildRangeLabel(segment.slotStart, segment.slotEnd, timeZone)];
-      if (segment.status === 'available') {
-        lines.push(segment.chanAvailable === false ? 'Чан недоступний' : 'Чан доступний');
-      }
       drawSlotLabel(
         ctx,
         columnX,
@@ -181,7 +180,8 @@ export function generateAvailabilityImage({
         segmentHeight,
         segment.status,
         lines,
-        getDurationMinutes(segment.slotStart, segment.slotEnd) > 60
+        getDurationMinutes(segment.slotStart, segment.slotEnd) > 60,
+        segment.chanAvailable
       );
     });
   });
@@ -207,7 +207,7 @@ function drawBackground(ctx: SKRSContext2D, width: number, height: number) {
 function drawHeader(ctx: SKRSContext2D, days: Date[], settings: ScheduleSettings) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  const titleY = CARD_MARGIN + 8;
+  const titleY = CARD_MARGIN + 28;
 
   ctx.font = '700 48px "Arial"';
   ctx.fillStyle = '#f8fafc';
@@ -228,9 +228,9 @@ function drawHeader(ctx: SKRSContext2D, days: Date[], settings: ScheduleSettings
 
 function drawLegend(ctx: SKRSContext2D, top: number) {
   const items = [
-    { color: '#4ade80', label: 'Вільно' },
+    { color: '#4ade80', label: 'Вільно (баня)' },
+    { color: '#22d3ee', label: 'Вільно (баня + чан)' },
     { color: '#f87171', label: 'Зайнято' },
-    { color: '#334155', label: 'Минуло' },
   ];
 
   ctx.textAlign = 'left';
@@ -301,10 +301,10 @@ function drawBoardContainer(ctx: SKRSContext2D, layout: ReturnType<typeof buildL
 }
 
 function drawWeekToggle(ctx: SKRSContext2D, rangeLabel: string) {
-  const width = 280;
+  const width = 340;
   const height = 70;
   const x = CANVAS_WIDTH - RIGHT_MARGIN - width;
-  const y = CARD_MARGIN + 4;
+  const y = CARD_MARGIN + 18;
 
   ctx.save();
   ctx.fillStyle = 'rgba(15,23,42,0.9)';
@@ -435,6 +435,11 @@ function drawSlotCell(
     gradient.addColorStop(0, '#6ee7b7');
     gradient.addColorStop(1, '#34d399');
     fillStyle = gradient;
+  } else if (status === 'available_with_chan') {
+    const gradient = ctx.createLinearGradient(x, y, x, y + height);
+    gradient.addColorStop(0, '#67e8f9');
+    gradient.addColorStop(1, '#22d3ee');
+    fillStyle = gradient;
   } else if (status === 'booked') {
     const gradient = ctx.createLinearGradient(x, y, x, y + height);
     gradient.addColorStop(0, '#f87171');
@@ -452,10 +457,12 @@ function drawSlotCell(
   ctx.shadowColor =
     status === 'available'
       ? 'rgba(16,185,129,0.4)'
-      : status === 'booked'
-        ? 'rgba(239,68,68,0.35)'
-        : 'rgba(15,23,42,0.4)';
-  ctx.shadowBlur = status === 'past' ? 18 : 26;
+      : status === 'available_with_chan'
+        ? 'rgba(34,211,238,0.4)'
+        : status === 'booked'
+          ? 'rgba(239,68,68,0.35)'
+          : 'rgba(15,23,42,0.4)';
+  ctx.shadowBlur = 26;
   ctx.beginPath();
   ctx.roundRect(x, y, width, height, 24);
   ctx.fill();
@@ -470,36 +477,43 @@ function drawSlotLabel(
   height: number,
   status: SlotStatus,
   lines: string[],
-  showStatus: boolean
+  showStatus: boolean,
+  chanAvailable?: boolean
 ) {
-  const labels: Record<SlotStatus, string> = {
-    available: 'Вільно',
-    booked: 'ЗАЙНЯТО',
-    past: 'МИНУЛО',
-  };
-
   const textLines = [...lines.filter(Boolean)];
+
   if (showStatus) {
-    textLines.push(labels[status]);
+    if (status === 'booked') {
+      textLines.push('ЗАЙНЯТО');
+    } else if (status === 'available') {
+      textLines.push('Вільно · баня');
+      textLines.push('(без чану)');
+    } else if (status === 'available_with_chan') {
+      textLines.push('Вільно · баня');
+      textLines.push('+ чан');
+    }
   }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  if (status === 'past') {
-    ctx.fillStyle = '#cbd5f5';
-  } else if (status === 'available') {
+  if (status === 'available') {
     ctx.fillStyle = '#052f1c';
+  } else if (status === 'available_with_chan') {
+    ctx.fillStyle = '#083344';
   } else {
     ctx.fillStyle = '#f8fafc';
   }
 
-  const maxWidth = width - 24;
+  const maxWidth = width - 7; // Зменшили відступи з 24 до 16
   const heights: number[] = [];
   const fonts: string[] = [];
 
-  textLines.forEach((line, index) => {
-    const isStatusLine = showStatus && index === textLines.length - 1;
-    const baseSize = isStatusLine ? 32 : 30;
-    const weight = isStatusLine ? 700 : 600;
+  // Знаходимо мінімальний розмір, який підходить для ВСІХ рядків
+  const baseSize = 48; // Збільшили з 28 до 34
+  const weight = 600;
+  let finalSize = baseSize;
+
+  // Перевіряємо кожен рядок і знаходимо мінімальний розмір
+  for (const line of textLines) {
     let size = baseSize;
     let font = `${weight} ${size}px "Arial"`;
     ctx.font = font;
@@ -509,8 +523,18 @@ function drawSlotLabel(
       font = `${weight} ${size}px "Arial"`;
       ctx.font = font;
     }
-    fonts.push(font);
-    heights.push(size + 6);
+
+    // Запам'ятовуємо найменший розмір
+    if (size < finalSize) {
+      finalSize = size;
+    }
+  }
+
+  // Застосовуємо однаковий розмір до всіх рядків
+  const finalFont = `${weight} ${finalSize}px "Arial"`;
+  textLines.forEach(() => {
+    fonts.push(finalFont);
+    heights.push(finalSize + 6);
   });
 
   const totalHeight =
@@ -559,6 +583,13 @@ function buildTimeTicks(openTime: string, closeTime: string): TimeTick[] {
       label: minutes % 60 === 0 ? minutesToLabel(minutes) : '',
     });
   }
+
+  // Додаємо час закриття (23:00) як останній label
+  ticks.push({
+    timeString: closeTime,
+    label: closeTime,
+  });
+
   return ticks;
 }
 
@@ -648,13 +679,20 @@ function resolveSlotStatus(
   const slotStart = toDateAtTime(iso, timeStr, settings.timeZone);
   const slotEnd = addMinutes(slotStart, GRID_MINUTE_STEP);
 
+  // Минулі слоти показуємо як зайняті
   if (slotEnd <= now) {
-    return 'past';
+    return 'booked';
   }
 
   const slots = availability.get(iso) ?? [];
-  const isFree = slots.some((entry) => slotStart >= entry.start && slotEnd <= entry.end);
-  return isFree ? 'available' : 'booked';
+  const freeSlot = slots.find((entry) => slotStart >= entry.start && slotEnd <= entry.end);
+
+  if (!freeSlot) {
+    return 'booked';
+  }
+
+  // Якщо чан доступний - синій, інакше - зелений
+  return freeSlot.chanAvailable ? 'available_with_chan' : 'available';
 }
 
 function buildSegments(cells: SlotCell[]): SlotSegment[] {

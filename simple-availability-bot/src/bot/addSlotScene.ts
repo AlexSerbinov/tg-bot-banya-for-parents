@@ -303,6 +303,7 @@ export function createAddSlotScene(service: AvailabilityService) {
             Markup.button.callback('🗑 Видалити', `slot:delete:${slot.id}`)
           ],
           [
+            Markup.button.callback('➕ Додати ще 1 слот', 'slot:add:another'),
             Markup.button.callback('🏠 Головне меню', 'slot:add:done')
           ]
         ]);
