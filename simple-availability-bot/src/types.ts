@@ -26,6 +26,7 @@ export interface AppConfig {
   schedule: ScheduleSettings;
   contactMessage: string;
   userStorageFile: string;
+  settingsStorageFile: string;
 }
 
 export interface SlotCreationPayload {
@@ -35,4 +36,8 @@ export interface SlotCreationPayload {
   note?: string;
   createdBy: number;
   chanAvailable?: boolean;
+}
+
+export interface BotSettings {
+  clientInfoText: string;
 }

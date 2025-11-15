@@ -37,6 +37,7 @@ export const appConfig: AppConfig = {
   adminIds: parseAdminIds(process.env.ADMIN_IDS),
   storageFile: process.env.STORAGE_FILE ?? path.join(projectRoot, 'data', 'availability.json'),
   userStorageFile: process.env.USER_STORAGE_FILE ?? path.join(projectRoot, 'data', 'users.json'),
+  settingsStorageFile: process.env.SETTINGS_STORAGE_FILE ?? path.join(projectRoot, 'data', 'settings.json'),
   contactMessage:
     process.env.CONTACT_MESSAGE ??
     'Щоб записатися, напишіть адміну у Telegram або зателефонуйте нам напряму 📞',

@@ -11,7 +11,7 @@ export function toDateAtTime(dateISO: string, timeStr: string, tz: string): Date
 
 export function formatDate(date: Date, tz: string): string {
   const zonedDate = toZonedTime(date, tz);
-  return format(zonedDate, 'EEE, d MMM', { locale: uk });
+  return format(zonedDate, 'EEEEEE, d MMM', { locale: uk });
 }
 
 export function formatTime(date: Date, tz: string): string {
@@ -36,4 +36,9 @@ export function getNextDays(count: number, tz: string): Date[] {
 
 export function dateToISO(date: Date): string {
   return format(date, 'yyyy-MM-dd');
+}
+
+export function formatDateShort(date: Date, tz: string): string {
+  const zonedDate = toZonedTime(date, tz);
+  return format(zonedDate, 'dd.MM');
 }

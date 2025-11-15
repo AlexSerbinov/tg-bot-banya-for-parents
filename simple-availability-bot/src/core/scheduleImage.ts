@@ -400,7 +400,7 @@ function drawDayHeaders(
       layout.gridX +
       index * (layout.columnWidth + COLUMN_GAP) +
       layout.columnWidth / 2;
-    const dayName = formatDateInZone(day, timeZone, 'EEE').toUpperCase();
+    const dayName = formatDateInZone(day, timeZone, 'EEEEEE').toUpperCase();
     const dateLabel = formatDateInZone(day, timeZone, 'd MMM');
 
     const pillX =

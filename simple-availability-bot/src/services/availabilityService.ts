@@ -25,8 +25,8 @@ export class AvailabilityService {
     return this.config.schedule.timeZone;
   }
 
-  getScheduleDays(): { date: Date; iso: string; label: string }[] {
-    const days = this.computeDisplayDays();
+  getScheduleDays(weekOffset = 0): { date: Date; iso: string; label: string }[] {
+    const days = this.computeDisplayDays(weekOffset);
     return days.map((date) => ({
       date,
       iso: dateToISO(date),
@@ -58,7 +58,11 @@ export class AvailabilityService {
 
   async getSlotById(id: string): Promise<AvailabilitySlot | undefined> {
     const slots = await this.store.list();
-    return slots.find((slot) => slot.id === id);
+    console.log('[getSlotById] Looking for id:', id);
+    console.log('[getSlotById] Available slot IDs:', slots.map(s => s.id).join(', '));
+    const found = slots.find((slot) => slot.id === id);
+    console.log('[getSlotById] Result:', found ? 'FOUND' : 'NOT FOUND');
+    return found;
   }
 
   async removeSlot(slotId: string): Promise<boolean> {
@@ -188,8 +192,8 @@ export class AvailabilityService {
     return this.store.clearDay(dateISO);
   }
 
-  async buildScheduleImage() {
-    const daysMeta = this.getScheduleDays();
+  async buildScheduleImage(weekOffset = 0) {
+    const daysMeta = this.getScheduleDays(weekOffset);
     const days = daysMeta.map((meta) => meta.date);
     const availability = await this.store.list();
     return generateAvailabilityImage({
@@ -241,6 +245,19 @@ export class AvailabilityService {
     return options;
   }
 
+  getEndTimeOptions(): string[] {
+    const openMinutes = timeToMinutes(this.schedule.dayOpenTime);
+    const closeMinutes = timeToMinutes(this.schedule.dayCloseTime);
+    const step = this.getMinuteStep();
+
+    const options: string[] = [];
+    // Для часу закінчення включаємо час закриття (23:00)
+    for (let value = openMinutes; value <= closeMinutes; value += step) {
+      options.push(minutesToLabel(value));
+    }
+    return options;
+  }
+
   private assertTimeFormat(time: string) {
     if (!/^\d{2}:\d{2}$/.test(time)) {
       throw new Error('Очікуваний формат часу HH:mm');
@@ -266,13 +283,16 @@ export class AvailabilityService {
     return Math.min(30, Math.max(5, configured));
   }
 
-  private computeDisplayDays(): Date[] {
+  private computeDisplayDays(weekOffset = 0): Date[] {
     const nowZoned = toZonedTime(new Date(), this.timeZone);
     const todayIso = formatDateISO(new Date(), this.timeZone);
     let startDate = toDateAtTime(todayIso, '00:00', this.timeZone);
     if (nowZoned.getHours() >= 22) {
       startDate = addDays(startDate, 1);
     }
+
+    // Додаємо зміщення по тижнях (7 днів)
+    startDate = addDays(startDate, weekOffset * 7);
 
     return Array.from({ length: this.schedule.scheduleDays }, (_, idx) =>
       addDays(startDate, idx)
