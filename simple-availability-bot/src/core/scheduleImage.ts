@@ -2,6 +2,7 @@ import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import { addMinutes, format } from 'date-fns';
 import { uk } from 'date-fns/locale';
 import { toZonedTime } from 'date-fns-tz';
+import { performance } from 'node:perf_hooks';
 import { AvailabilitySlot, ScheduleSettings } from '../types';
 import { dateToISO, toDateAtTime } from '../utils/time';
 
@@ -15,16 +16,22 @@ const LEFT_MARGIN = 72;
 const RIGHT_MARGIN = 72;
 const ROW_LABEL_WIDTH = 150;
 const COLUMN_GAP = 20;
-const ROW_HEIGHT = 36;
-const ROW_GAP = 12;
+const BASE_ROW_HEIGHT = 36;
+const BASE_ROW_GAP = 12;
 const BOARD_PADDING_LEFT = 32;
 const BOARD_PADDING_RIGHT = 32;
 const BOARD_PADDING_TOP = 32;
 const BOARD_PADDING_BOTTOM = 40;
 const DAY_HEADER_HEIGHT = 70;
 const BOTTOM_PADDING = 72;
+const GRID_MINUTE_STEP = 30;
 
 type SlotStatus = 'available' | 'booked' | 'past';
+
+interface TimeTick {
+  timeString: string;
+  label: string;
+}
 
 interface SlotCell {
   status: SlotStatus;
@@ -59,12 +66,15 @@ export function generateAvailabilityImage({
   availability,
   aggregateSlots = true,
 }: GenerateImageArgs): WeeklyScheduleImageResult {
+  const perfStart = performance.now();
   if (!days.length) {
     throw new Error('Не передано жодного дня для генерації розкладу');
   }
 
-  const hourLabels = buildHourLabels(settings.dayOpenTime, settings.dayCloseTime);
-  const layout = buildLayout(days.length, hourLabels.length);
+  const layoutStart = performance.now();
+  const timeTicks = buildTimeTicks(settings.dayOpenTime, settings.dayCloseTime);
+  const layout = buildLayout(days.length, timeTicks.length);
+  logStep('layout prepared', layoutStart);
   const canvasHeight = layout.canvasHeight;
   const canvas = createCanvas(CANVAS_WIDTH, canvasHeight);
   const ctx = canvas.getContext('2d');
@@ -74,11 +84,13 @@ export function generateAvailabilityImage({
   drawHeader(ctx, days, settings);
   drawLegend(ctx, HEADER_HEIGHT + HEADER_BOTTOM_MARGIN);
   drawBoardContainer(ctx, layout);
-  drawRowLabels(ctx, hourLabels, layout.gridY, layout.rowHeightWithGap);
-  drawGrid(ctx, layout, days.length, hourLabels.length);
+  drawRowLabels(ctx, timeTicks, layout.gridY, layout.rowHeightWithGap, layout.rowHeight);
+  drawGrid(ctx, layout, days.length, timeTicks.length);
   drawDayHeaders(ctx, days, layout, settings.timeZone);
 
+  const groupingStart = performance.now();
   const availabilityByDay = groupAvailability(availability, settings.timeZone);
+  logStep('group availability', groupingStart);
   const stats: Record<SlotStatus, number> = {
     available: 0,
     booked: 0,
@@ -88,20 +100,21 @@ export function generateAvailabilityImage({
   const now = new Date();
   const dayCells = days.map(() => [] as SlotCell[]);
 
+  const populateStart = performance.now();
   days.forEach((day, columnIndex) => {
     const iso = dateToISO(day);
-    hourLabels.forEach((label, rowIndex) => {
+    timeTicks.forEach((tick, rowIndex) => {
       const status = resolveSlotStatus(
         iso,
-        label,
+        tick.timeString,
         settings,
         availabilityByDay,
         now
       );
       stats[status] += 1;
 
-      const slotStart = toDateAtTime(iso, label, settings.timeZone);
-      const slotEnd = addMinutes(slotStart, 60);
+      const slotStart = toDateAtTime(iso, tick.timeString, settings.timeZone);
+      const slotEnd = addMinutes(slotStart, GRID_MINUTE_STEP);
 
       dayCells[columnIndex].push({
         status,
@@ -111,16 +124,18 @@ export function generateAvailabilityImage({
       });
     });
   });
+  logStep('populate cells', populateStart);
 
   const timeZone = settings.timeZone;
 
+  const drawStart = performance.now();
   dayCells.forEach((cells, columnIndex) => {
     const columnX = layout.gridX + columnIndex * (layout.columnWidth + COLUMN_GAP);
 
     if (!aggregateSlots) {
       cells.forEach((cell) => {
-        const cellY = layout.gridY + cell.rowIndex * (ROW_HEIGHT + ROW_GAP);
-        drawSlotCell(ctx, columnX, cellY, layout.columnWidth, ROW_HEIGHT, cell.status);
+        const cellY = layout.gridY + cell.rowIndex * (layout.rowHeight + layout.rowGap);
+        drawSlotCell(ctx, columnX, cellY, layout.columnWidth, layout.rowHeight, cell.status);
         const lines = [buildRangeLabel(cell.slotStart, cell.slotEnd, timeZone)];
         const showStatus = getDurationMinutes(cell.slotStart, cell.slotEnd) > 60;
         drawSlotLabel(
@@ -128,7 +143,7 @@ export function generateAvailabilityImage({
           columnX,
           cellY,
           layout.columnWidth,
-          ROW_HEIGHT,
+          layout.rowHeight,
           cell.status,
           lines,
           showStatus
@@ -140,9 +155,9 @@ export function generateAvailabilityImage({
     const segments = buildSegments(cells);
     segments.forEach((segment) => {
       const rowCount = segment.endRow - segment.startRow;
-      const cellY = layout.gridY + segment.startRow * (ROW_HEIGHT + ROW_GAP);
+      const cellY = layout.gridY + segment.startRow * (layout.rowHeight + layout.rowGap);
       const segmentHeight =
-        rowCount * ROW_HEIGHT + Math.max(0, rowCount - 1) * ROW_GAP;
+        rowCount * layout.rowHeight + Math.max(0, rowCount - 1) * layout.rowGap;
       drawSlotCell(ctx, columnX, cellY, layout.columnWidth, segmentHeight, segment.status);
       drawSlotLabel(
         ctx,
@@ -156,9 +171,14 @@ export function generateAvailabilityImage({
       );
     });
   });
+  logStep('draw columns', drawStart);
 
   const buffer = canvas.toBuffer('image/png');
-  console.log(`🖼  Availability image generated (${buffer.length} bytes)`);
+  console.log(
+    `🖼  Availability image generated (${buffer.length} bytes) in ${(
+      performance.now() - perfStart
+    ).toFixed(1)}ms`
+  );
   return { buffer, stats };
 }
 
@@ -306,15 +326,22 @@ function drawWeekToggle(ctx: SKRSContext2D, rangeLabel: string) {
   ctx.restore();
 }
 
-function drawRowLabels(ctx: SKRSContext2D, labels: string[], gridY: number, rowHeightWithGap: number) {
+function drawRowLabels(
+  ctx: SKRSContext2D,
+  ticks: TimeTick[],
+  gridY: number,
+  rowHeightWithGap: number,
+  rowHeight: number
+) {
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
   ctx.font = '600 20px "Arial"';
   ctx.fillStyle = '#5f6f94';
 
-  labels.forEach((label, index) => {
-    const y = gridY + index * rowHeightWithGap + ROW_HEIGHT / 2;
-    ctx.fillText(label, LEFT_MARGIN + ROW_LABEL_WIDTH - 16, y);
+  ticks.forEach((tick, index) => {
+    if (!tick.label) return;
+    const y = gridY + index * rowHeightWithGap + rowHeight / 2;
+    ctx.fillText(tick.label, LEFT_MARGIN + ROW_LABEL_WIDTH - 16, y);
   });
 }
 
@@ -328,7 +355,7 @@ function drawGrid(
   ctx.lineWidth = 1;
 
   for (let row = 0; row <= rowsCount; row += 1) {
-    const y = layout.gridY + row * (ROW_HEIGHT + ROW_GAP) - ROW_GAP / 2;
+    const y = layout.gridY + row * (layout.rowHeight + layout.rowGap) - layout.rowGap / 2;
     ctx.beginPath();
     ctx.moveTo(layout.gridX, y);
     ctx.lineTo(layout.gridX + layout.gridWidth, y);
@@ -456,8 +483,9 @@ function drawSlotLabel(
   const fonts: string[] = [];
 
   textLines.forEach((line, index) => {
-    const baseSize = index === textLines.length - 1 ? 32 : 24;
-    const weight = index === textLines.length - 1 ? 700 : 600;
+    const isStatusLine = showStatus && index === textLines.length - 1;
+    const baseSize = isStatusLine ? 32 : 30;
+    const weight = isStatusLine ? 700 : 600;
     let size = baseSize;
     let font = `${weight} ${size}px "Arial"`;
     ctx.font = font;
@@ -507,16 +535,17 @@ function formatDateInZone(date: Date, timeZone: string, pattern: string): string
   return format(zoned, pattern, { locale: uk });
 }
 
-function buildHourLabels(openTime: string, closeTime: string): string[] {
+function buildTimeTicks(openTime: string, closeTime: string): TimeTick[] {
   const openMinutes = timeToMinutes(openTime);
   const closeMinutes = timeToMinutes(closeTime);
-  const labels: string[] = [];
-
-  for (let minutes = openMinutes; minutes < closeMinutes; minutes += 60) {
-    labels.push(minutesToLabel(minutes));
+  const ticks: TimeTick[] = [];
+  for (let minutes = openMinutes; minutes < closeMinutes; minutes += GRID_MINUTE_STEP) {
+    ticks.push({
+      timeString: minutesToLabel(minutes),
+      label: minutes % 60 === 0 ? minutesToLabel(minutes) : '',
+    });
   }
-
-  return labels;
+  return ticks;
 }
 
 function timeToMinutes(timeStr: string): number {
@@ -536,15 +565,23 @@ function getDurationMinutes(start: Date, end: Date): number {
   return (end.getTime() - start.getTime()) / 60000;
 }
 
+function logStep(label: string, start: number) {
+  const duration = (performance.now() - start).toFixed(1);
+  console.log(`[ScheduleImage] ${label}: ${duration}ms`);
+}
+
 function buildLayout(daysCount: number, rowsCount: number) {
+  const stepRatio = GRID_MINUTE_STEP / 60;
+  const rowHeight = BASE_ROW_HEIGHT * stepRatio;
+  const rowGap = BASE_ROW_GAP * stepRatio;
   const gridX = LEFT_MARGIN + ROW_LABEL_WIDTH;
   const availableWidth = CANVAS_WIDTH - gridX - RIGHT_MARGIN;
   const columnWidth =
     (availableWidth - COLUMN_GAP * Math.max(0, daysCount - 1)) / daysCount;
   const gridWidth = columnWidth * daysCount + COLUMN_GAP * Math.max(0, daysCount - 1);
 
-  const rowHeightWithGap = ROW_HEIGHT + ROW_GAP;
-  const gridHeight = rowsCount * ROW_HEIGHT + Math.max(0, rowsCount - 1) * ROW_GAP;
+  const rowHeightWithGap = rowHeight + rowGap;
+  const gridHeight = rowsCount * rowHeight + Math.max(0, rowsCount - 1) * rowGap;
   const boardY = HEADER_HEIGHT + HEADER_BOTTOM_MARGIN + LEGEND_HEIGHT + LEGEND_BOTTOM_MARGIN;
   const gridY = boardY + BOARD_PADDING_TOP + DAY_HEADER_HEIGHT;
   const boardX = LEFT_MARGIN - BOARD_PADDING_LEFT;
@@ -560,6 +597,8 @@ function buildLayout(daysCount: number, rowsCount: number) {
     gridHeight,
     columnWidth,
     rowHeightWithGap,
+    rowHeight,
+    rowGap,
     boardX,
     boardY,
     boardWidth,
@@ -593,7 +632,7 @@ function resolveSlotStatus(
   now: Date
 ): SlotStatus {
   const slotStart = toDateAtTime(iso, timeStr, settings.timeZone);
-  const slotEnd = addMinutes(slotStart, 60);
+  const slotEnd = addMinutes(slotStart, GRID_MINUTE_STEP);
 
   if (slotEnd <= now) {
     return 'past';

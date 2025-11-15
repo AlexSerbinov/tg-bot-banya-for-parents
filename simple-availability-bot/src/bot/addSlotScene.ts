@@ -178,10 +178,10 @@ function buildStartTimesKeyboard(service: AvailabilityService) {
 
 function getEndTimeOptions(service: AvailabilityService, startTime: string): string[] {
   const startMinutes = timeToMinutes(startTime);
-  const minDurationMinutes = getMinimumDurationMinutes(service);
+  const step = service.getTimeStepMinutes();
   return service
     .getTimeOptions()
-    .filter((time) => timeToMinutes(time) - startMinutes >= minDurationMinutes);
+    .filter((time) => timeToMinutes(time) - startMinutes >= step);
 }
 
 function buildEndTimesKeyboard(options: string[]) {

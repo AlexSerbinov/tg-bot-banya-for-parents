@@ -55,17 +55,16 @@ export class AvailabilityService {
     this.assertMinuteStep(payload.startTime);
     this.assertMinuteStep(payload.endTime);
 
+    const minuteStep = this.getMinuteStep();
     const slotStart = toDateAtTime(payload.dateISO, payload.startTime, this.timeZone);
     const explicitEnd = toDateAtTime(payload.dateISO, payload.endTime, this.timeZone);
     if (explicitEnd <= slotStart) {
       throw new Error('Час завершення має бути пізнішим за початок');
     }
 
-    const minDurationMinutes = this.getMinimumDurationMinutes();
     const selectedDuration = differenceInMinutes(explicitEnd, slotStart);
-    if (selectedDuration < minDurationMinutes) {
-      const hours = (minDurationMinutes / 60).toFixed(0);
-      throw new Error(`Мінімальна тривалість — ${hours} год.`);
+    if (selectedDuration < minuteStep) {
+      throw new Error(`Мінімальна тривалість — ${minuteStep} хв.`);
     }
 
     const dayOpen = toDateAtTime(payload.dateISO, this.schedule.dayOpenTime, this.timeZone);
@@ -164,7 +163,7 @@ export class AvailabilityService {
   getTimeOptions(): string[] {
     const openMinutes = timeToMinutes(this.schedule.dayOpenTime);
     const closeMinutes = timeToMinutes(this.schedule.dayCloseTime);
-    const step = Math.max(15, this.schedule.slotStepMinutes);
+    const step = this.getMinuteStep();
 
     const options: string[] = [];
     for (let value = openMinutes; value < closeMinutes; value += step) {
@@ -183,18 +182,19 @@ export class AvailabilityService {
     const [, minutesStr] = time.split(':');
     const minutes = Number(minutesStr);
     if (!Number.isFinite(minutes)) return;
-    const step = Math.max(5, this.schedule.slotStepMinutes);
+    const step = this.getMinuteStep();
     if (minutes % step !== 0) {
       throw new Error(`Використовуйте крок ${step} хвилин`);
     }
   }
 
-  private getMinimumDurationMinutes(): number {
-    const allowed = this.config.schedule.allowedDurationsHours;
-    if (allowed.length) {
-      return Math.min(...allowed) * 60;
-    }
-    return 120;
+  getTimeStepMinutes(): number {
+    return this.getMinuteStep();
+  }
+
+  private getMinuteStep(): number {
+    const configured = Number(this.schedule.slotStepMinutes) || 30;
+    return Math.min(30, Math.max(5, configured));
   }
 
   private computeDisplayDays(): Date[] {
