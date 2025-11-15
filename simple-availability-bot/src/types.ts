@@ -24,6 +24,7 @@ export interface AppConfig {
   storageFile: string;
   schedule: ScheduleSettings;
   contactMessage: string;
+  userStorageFile: string;
 }
 
 export interface SlotCreationPayload {

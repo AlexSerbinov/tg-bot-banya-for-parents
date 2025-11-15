@@ -5,6 +5,7 @@ import { AvailabilityService } from '../services/availabilityService';
 import { createAddSlotScene, ADD_SLOT_SCENE_ID } from './addSlotScene';
 import { formatDate, toDateAtTime } from '../utils/time';
 import { BotContext } from './types';
+import { UserStore } from '../storage/userStore';
 
 type Mode = 'client' | 'admin';
 
@@ -13,6 +14,7 @@ const MODE_TOGGLE_ROW = ['🎫 Режим клієнта', '🛠 Режим ад
 const ADMIN_MENU = [
   ['➕ Додати слот', '🧹 Очистити день'],
   ['📋 Всі слоти', '🖼 Показати розклад'],
+  ['📢 Розсилка'],
 ];
 
 const CLIENT_MENU = [
@@ -28,11 +30,26 @@ const CLIENT_INFO_TEXT = [
   'Усі години автоматично вважаються зайнятими, окрім тих, що ми відкрили як вільні.',
 ].join('\n');
 
-export function createBot(config: AppConfig, service: AvailabilityService) {
+export function createBot(
+  config: AppConfig,
+  service: AvailabilityService,
+  userStore: UserStore
+) {
   const bot = new Telegraf<BotContext>(config.botToken);
   const stage = new Scenes.Stage<BotContext>([createAddSlotScene(service)]);
 
   bot.use(session());
+  bot.use(async (ctx, next) => {
+    if (ctx.from?.id) {
+      await userStore.addUser({
+        tgId: ctx.from.id,
+        firstName: ctx.from.first_name ?? undefined,
+        lastName: ctx.from.last_name ?? undefined,
+        username: ctx.from.username ?? undefined,
+      });
+    }
+    return next();
+  });
   bot.use(stage.middleware());
 
   bot.start(async (ctx) => {
@@ -66,6 +83,10 @@ export function createBot(config: AppConfig, service: AvailabilityService) {
 
   bot.command('admin', onlyAdmin(config, async (ctx) => {
     await switchMode(ctx, 'admin', config);
+  }));
+
+  bot.command('broadcast', onlyAdmin(config, async (ctx) => {
+    await startBroadcastFlow(ctx);
   }));
 
   bot.command('schedule', async (ctx) => {
@@ -105,6 +126,10 @@ export function createBot(config: AppConfig, service: AvailabilityService) {
     await promptClearDay(ctx, service, config);
   }));
 
+  bot.hears('📢 Розсилка', onlyAdmin(config, async (ctx) => {
+    await startBroadcastFlow(ctx);
+  }));
+
   bot.action(/^admin:clear:(.+)$/, onlyAdminAction(config, async (ctx) => {
     const iso = ctx.match[1];
     const removed = await service.clearDay(iso);
@@ -120,6 +145,77 @@ export function createBot(config: AppConfig, service: AvailabilityService) {
     await ctx.answerCbQuery('Скасовано');
     await ctx.editMessageText('Гаразд, нічого не чистимо 👍');
   }));
+
+  bot.action('BROADCAST_CONFIRM', onlyAdminAction(config, async (ctx) => {
+    const session = getBotSession(ctx);
+    const draft = session.broadcastDraft;
+    if (!draft) {
+      await ctx.answerCbQuery('Немає тексту для розсилки');
+      return;
+    }
+    session.broadcastDraft = undefined;
+
+    await ctx.editMessageText('📤 Розсилка розпочата...');
+
+    const users = await userStore.list();
+    let success = 0;
+    let failed = 0;
+    const formatted =
+      '🔥 Повідомлення від власників бані 🔥\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+      `${draft}\n\n` +
+      '━━━━━━━━━━━━━━━━━━━━━━';
+
+    for (const user of users) {
+      try {
+        await bot.telegram.sendMessage(user.tgId, formatted);
+        success += 1;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      } catch (error) {
+        console.error(`Failed to send broadcast to ${user.tgId}`, error);
+        failed += 1;
+      }
+    }
+
+    await ctx.editMessageText(
+      `📢 Розсилка завершена\n\n✅ Надіслано: ${success}\n⚠️ З помилкою: ${failed}`
+    );
+    await ctx.answerCbQuery();
+  }));
+
+  bot.action('BROADCAST_CANCEL', onlyAdminAction(config, async (ctx) => {
+    const session = getBotSession(ctx);
+    session.broadcastDraft = undefined;
+    session.awaitingBroadcast = false;
+    await ctx.editMessageText('❌ Розсилку скасовано');
+    await ctx.answerCbQuery();
+  }));
+
+  bot.on('text', async (ctx, next) => {
+    const session = getBotSession(ctx);
+    if (session.awaitingBroadcast) {
+      const message = ctx.message.text.trim();
+      session.broadcastDraft = message;
+      session.awaitingBroadcast = false;
+
+      const userCount = await userStore.count();
+      await ctx.reply(
+        [
+          '📢 Попередній перегляд розсилки',
+          '━━━━━━━━━━━━━━',
+          message,
+          '━━━━━━━━━━━━━━',
+          `Буде надіслано ${userCount} користувачам.`,
+          '',
+          'Надіслати?'
+        ].join('\n'),
+        buildBroadcastConfirmKeyboard()
+      );
+      return;
+    }
+
+    await next();
+  });
 
   bot.catch((error) => {
     console.error('Bot error:', error);
@@ -261,5 +357,27 @@ function buildKeyboard(mode: Mode) {
 }
 
 function getBotSession(ctx: BotContext) {
-  return ctx.session as typeof ctx.session & { mode?: Mode };
+  return ctx.session as typeof ctx.session & {
+    mode?: Mode;
+    awaitingBroadcast?: boolean;
+    broadcastDraft?: string;
+  };
+}
+
+function buildBroadcastConfirmKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('✅ Відправити всім', 'BROADCAST_CONFIRM')],
+    [Markup.button.callback('❌ Скасувати', 'BROADCAST_CANCEL')],
+  ]);
+}
+
+async function startBroadcastFlow(ctx: BotContext) {
+  const session = getBotSession(ctx);
+  session.awaitingBroadcast = true;
+  session.broadcastDraft = undefined;
+
+  await ctx.reply(
+    '📢 Введіть текст повідомлення для розсилки.\n' +
+      'Воно буде показане всім користувачам, які колись писали цьому боту.'
+  );
 }

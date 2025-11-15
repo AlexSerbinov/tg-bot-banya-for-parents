@@ -36,6 +36,7 @@ export const appConfig: AppConfig = {
   botToken: requireEnv('BOT_TOKEN'),
   adminIds: parseAdminIds(process.env.ADMIN_IDS),
   storageFile: process.env.STORAGE_FILE ?? path.join(projectRoot, 'data', 'availability.json'),
+  userStorageFile: process.env.USER_STORAGE_FILE ?? path.join(projectRoot, 'data', 'users.json'),
   contactMessage:
     process.env.CONTACT_MESSAGE ??
     'Щоб записатися, напишіть адміну у Telegram або зателефонуйте нам напряму 📞',

@@ -2,11 +2,13 @@ import { appConfig } from './config';
 import { AvailabilityStore } from './storage/availabilityStore';
 import { AvailabilityService } from './services/availabilityService';
 import { createBot } from './bot';
+import { UserStore } from './storage/userStore';
 
 async function bootstrap() {
   const store = new AvailabilityStore(appConfig.storageFile);
   const service = new AvailabilityService(store, appConfig);
-  const bot = createBot(appConfig, service);
+  const userStore = new UserStore(appConfig.userStorageFile);
+  const bot = createBot(appConfig, service, userStore);
 
   await bot.launch();
   console.log('🚀 Simple availability bot запущено');
