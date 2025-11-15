@@ -43,10 +43,82 @@ export class AvailabilityService {
       }
       grouped.get(slot.dateISO)!.push(slot);
     });
-    return Array.from(grouped.entries()).map(([iso, daySlots]) => ({
-      iso,
-      slots: daySlots.sort((a, b) => a.startTime.localeCompare(b.startTime)),
-    }));
+    return Array.from(grouped.entries())
+      .sort(([isoA], [isoB]) => isoA.localeCompare(isoB))
+      .map(([iso, daySlots]) => ({
+        iso,
+        slots: daySlots.sort((a, b) => a.startTime.localeCompare(b.startTime)),
+      }));
+  }
+
+  async listAllSlots(): Promise<AvailabilitySlot[]> {
+    const grouped = await this.listSlotsGrouped();
+    return grouped.flatMap((entry) => entry.slots);
+  }
+
+  async getSlotById(id: string): Promise<AvailabilitySlot | undefined> {
+    const slots = await this.store.list();
+    return slots.find((slot) => slot.id === id);
+  }
+
+  async removeSlot(slotId: string): Promise<boolean> {
+    return this.store.remove(slotId);
+  }
+
+  async updateSlotTimes(slotId: string, startTime: string, endTime: string): Promise<AvailabilitySlot> {
+    this.assertTimeFormat(startTime);
+    this.assertTimeFormat(endTime);
+    this.assertMinuteStep(startTime);
+    this.assertMinuteStep(endTime);
+
+    const slot = await this.getSlotById(slotId);
+    if (!slot) {
+      throw new Error('Слот не знайдено');
+    }
+
+    const slotStart = toDateAtTime(slot.dateISO, startTime, this.timeZone);
+    const slotEnd = toDateAtTime(slot.dateISO, endTime, this.timeZone);
+    if (slotEnd <= slotStart) {
+      throw new Error('Кінець має бути пізніше початку');
+    }
+
+    const dayOpen = toDateAtTime(slot.dateISO, this.schedule.dayOpenTime, this.timeZone);
+    const dayClose = toDateAtTime(slot.dateISO, this.schedule.dayCloseTime, this.timeZone);
+    if (slotStart < dayOpen || slotEnd > dayClose) {
+      throw new Error('Слот виходить за межі дня');
+    }
+
+    const daySlots = await this.store.listByDate(slot.dateISO);
+    const overlaps = daySlots.some((other) => {
+      if (other.id === slotId) return false;
+      const otherStart = toDateAtTime(other.dateISO, other.startTime, this.timeZone);
+      const otherEnd = toDateAtTime(other.dateISO, other.endTime, this.timeZone);
+      return rangesOverlap(slotStart, slotEnd, otherStart, otherEnd);
+    });
+
+    if (overlaps) {
+      throw new Error('Слот перетинається з іншим');
+    }
+
+    slot.startTime = startTime;
+    slot.endTime = endTime;
+    slot.durationMinutes = differenceInMinutes(slotEnd, slotStart);
+
+    const updated = daySlots.map((other) => (other.id === slotId ? slot : other));
+    await this.store.setSlotsForDate(slot.dateISO, updated);
+    return slot;
+  }
+
+  async toggleChanAvailability(slotId: string): Promise<AvailabilitySlot> {
+    const slot = await this.getSlotById(slotId);
+    if (!slot) {
+      throw new Error('Слот не знайдено');
+    }
+    slot.chanAvailable = !slot.chanAvailable;
+    const daySlots = await this.store.listByDate(slot.dateISO);
+    const updated = daySlots.map((other) => (other.id === slotId ? slot : other));
+    await this.store.setSlotsForDate(slot.dateISO, updated);
+    return slot;
   }
 
   async addSlotRange(payload: SlotCreationPayload): Promise<AvailabilitySlot> {
@@ -105,6 +177,7 @@ export class AvailabilityService {
       createdBy: payload.createdBy,
       createdAt: new Date().toISOString(),
       note: payload.note?.trim() || undefined,
+      chanAvailable: payload.chanAvailable ?? true,
     };
 
     await this.store.setSlotsForDate(payload.dateISO, [...keep, slot]);
@@ -113,10 +186,6 @@ export class AvailabilityService {
 
   async clearDay(dateISO: string): Promise<number> {
     return this.store.clearDay(dateISO);
-  }
-
-  async removeSlot(id: string): Promise<boolean> {
-    return this.store.remove(id);
   }
 
   async buildScheduleImage() {

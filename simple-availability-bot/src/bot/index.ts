@@ -1,10 +1,10 @@
 import { Telegraf, Markup, Scenes, session } from 'telegraf';
 import type { MiddlewareFn } from 'telegraf';
-import { AppConfig } from '../types';
+import { AppConfig, AvailabilitySlot } from '../types';
 import { AvailabilityService } from '../services/availabilityService';
 import { createAddSlotScene, ADD_SLOT_SCENE_ID } from './addSlotScene';
 import { formatDate, toDateAtTime } from '../utils/time';
-import { BotContext } from './types';
+import { BotContext, BotSession } from './types';
 import { UserStore } from '../storage/userStore';
 
 type Mode = 'client' | 'admin';
@@ -119,7 +119,7 @@ export function createBot(
   bot.hears('➕ Додати слот', onlyAdmin(config, (ctx) => ctx.scene.enter(ADD_SLOT_SCENE_ID)));
 
   bot.hears('📋 Всі слоти', onlyAdmin(config, async (ctx) => {
-    await sendSlotsList(ctx, service, config);
+    await showSlotsOverview(ctx, service, config);
   }));
 
   bot.hears('🧹 Очистити день', onlyAdmin(config, async (ctx) => {
@@ -217,6 +217,78 @@ export function createBot(
     await next();
   });
 
+  bot.action('slot:back', onlyAdminAction(config, async (ctx) => {
+    await showSlotsOverview(ctx, service, config, { edit: true });
+    await ctx.answerCbQuery();
+  }));
+
+  bot.action(/^slot:view:(.+)$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    const ok = await showSlotDetail(ctx, service, config, slotId);
+    if (!ok) {
+      await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+      return;
+    }
+    await ctx.answerCbQuery();
+  }));
+
+  bot.action(/^slot:delete:(.+)$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    const removed = await service.removeSlot(slotId);
+    if (!removed) {
+      await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+      return;
+    }
+    await showSlotsOverview(ctx, service, config, { edit: true });
+    await ctx.answerCbQuery('Слот видалено');
+  }));
+
+  bot.action(/^slot:toggle:(.+)$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    try {
+      await service.toggleChanAvailability(slotId);
+      const ok = await showSlotDetail(ctx, service, config, slotId, 'Статус чану змінено');
+      if (!ok) {
+        await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+        return;
+      }
+      await ctx.answerCbQuery();
+    } catch (error) {
+      await ctx.answerCbQuery('Не вдалося змінити слот', { show_alert: true });
+    }
+  }));
+
+  bot.action(/^slot:edit:(.+)$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    await showStartSelection(ctx, service, config, slotId);
+  }));
+
+  bot.action(/^slot:edit:start:(.+):([0-9]{4})$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    const startKey = ctx.match[2];
+    const startTime = decodeTimeKey(startKey);
+    await showEndSelection(ctx, service, config, slotId, startTime);
+  }));
+
+  bot.action(/^slot:edit:apply:(.+):([0-9]{4}):([0-9]{4})$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    const startTime = decodeTimeKey(ctx.match[2]);
+    const endTime = decodeTimeKey(ctx.match[3]);
+    try {
+      await service.updateSlotTimes(slotId, startTime, endTime);
+      const ok = await showSlotDetail(ctx, service, config, slotId, 'Слот оновлено');
+      if (!ok) {
+        await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+        return;
+      }
+      await ctx.answerCbQuery();
+    } catch (error) {
+      await ctx.answerCbQuery(error instanceof Error ? error.message : 'Не вдалося оновити слот', {
+        show_alert: true,
+      });
+    }
+  }));
+
   bot.catch((error) => {
     console.error('Bot error:', error);
   });
@@ -273,22 +345,30 @@ async function sendScheduleImage(
   }
 }
 
-async function sendSlotsList(ctx: BotContext, service: AvailabilityService, config: AppConfig) {
+async function showSlotsOverview(
+  ctx: BotContext,
+  service: AvailabilityService,
+  config: AppConfig,
+  options: { edit?: boolean } = {}
+) {
   const grouped = await service.listSlotsGrouped();
   if (!grouped.length) {
-    await ctx.reply('Поки що все зайнято.');
+    if (options.edit) {
+      await ctx.editMessageText('Поки що все зайнято.');
+    } else {
+      await ctx.reply('Поки що все зайнято.');
+    }
     return;
   }
 
-  const lines = grouped.map((group) => {
-    const dayLabel = formatAdminDate(group.iso, config);
-    const slotsText = group.slots
-      .map((slot) => `• ${slot.startTime} – ${slot.endTime}`)
-      .join('\n');
-    return `📅 ${dayLabel}\n${slotsText}`;
-  });
+  const text = buildSlotListText(grouped, config);
+  const keyboard = Markup.inlineKeyboard(buildSlotButtons(grouped, config));
 
-  await ctx.reply(lines.join('\n\n'));
+  if (options.edit) {
+    await ctx.editMessageText(text, { reply_markup: keyboard.reply_markup });
+  } else {
+    await ctx.reply(text, keyboard);
+  }
 }
 
 async function promptClearDay(ctx: BotContext, service: AvailabilityService, config: AppConfig) {
@@ -306,6 +386,165 @@ async function promptClearDay(ctx: BotContext, service: AvailabilityService, con
     'Який день очистити від вільних слотів?',
     Markup.inlineKeyboard(splitIntoRows(buttons, 2).concat([[Markup.button.callback('Скасувати', 'admin:clear:cancel')]]))
   );
+}
+
+function buildSlotListText(
+  grouped: Array<{ iso: string; slots: AvailabilitySlot[] }>,
+  config: AppConfig
+): string {
+  const blocks = grouped.map((group) => {
+    const dayLabel = formatAdminDate(group.iso, config);
+    const slots = group.slots
+      .map((slot) => `• ${slot.startTime} – ${slot.endTime}${slot.chanAvailable ? '' : ' (без чану)'}`)
+      .join('\n');
+    return `📅 ${dayLabel}\n${slots}`;
+  });
+  return ['Оберіть слот, щоб керувати ним:', '', ...blocks].join('\n');
+}
+
+function buildSlotButtons(
+  grouped: Array<{ iso: string; slots: AvailabilitySlot[] }>,
+  config: AppConfig
+) {
+  const rows = grouped.flatMap((group) =>
+    group.slots.map((slot) => [
+      Markup.button.callback(
+        `${formatAdminDate(group.iso, config)} • ${slot.startTime} – ${slot.endTime}`,
+        `slot:view:${slot.id}`
+      ),
+    ])
+  );
+  return rows;
+}
+
+async function showSlotDetail(
+  ctx: BotContext,
+  service: AvailabilityService,
+  config: AppConfig,
+  slotId: string,
+  notice?: string
+): Promise<boolean> {
+  const slot = await service.getSlotById(slotId);
+  if (!slot) {
+    return false;
+  }
+
+  const text = formatSlotDetail(slot, config, notice);
+  await ctx.editMessageText(text, {
+    reply_markup: buildSlotActions(slot).reply_markup,
+  });
+  return true;
+}
+
+function buildSlotActions(slot: AvailabilitySlot) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ Редагувати', `slot:edit:${slot.id}`)],
+    [Markup.button.callback('🗑 Очистити', `slot:delete:${slot.id}`)],
+    [
+      Markup.button.callback(
+        slot.chanAvailable ? '🚫 Вимкнути чан' : '✅ Увімкнути чан',
+        `slot:toggle:${slot.id}`
+      ),
+    ],
+    [Markup.button.callback('⬅️ Назад', 'slot:back')],
+  ]);
+}
+
+function formatSlotDetail(slot: AvailabilitySlot, config: AppConfig, notice?: string): string {
+  const lines = [
+    notice ? `ℹ️ ${notice}` : null,
+    `📅 ${formatAdminDate(slot.dateISO, config)}`,
+    `⏱ ${slot.startTime} – ${slot.endTime}`,
+    `🛁 Чан: ${slot.chanAvailable ? 'доступний' : 'недоступний'}`,
+    '',
+    'Оберіть дію нижче.',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+async function showStartSelection(
+  ctx: BotContext,
+  service: AvailabilityService,
+  config: AppConfig,
+  slotId: string
+) {
+  const slot = await service.getSlotById(slotId);
+  if (!slot) {
+    await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+    return;
+  }
+  const times = service.getTimeOptions();
+  const rows = buildTimeSelectionKeyboard(times, slot.startTime, (time) =>
+    `slot:edit:start:${slot.id}:${encodeTimeKey(time)}`
+  );
+  rows.push([Markup.button.callback('⬅️ Назад', `slot:view:${slot.id}`)]);
+  const text = [
+    '✏️ Редагування слота',
+    `📅 ${formatAdminDate(slot.dateISO, config)}`,
+    `Поточний діапазон: ${slot.startTime} – ${slot.endTime}`,
+    '',
+    'Оберіть новий час початку:',
+  ].join('\n');
+  await ctx.editMessageText(text, { reply_markup: Markup.inlineKeyboard(rows).reply_markup });
+  await ctx.answerCbQuery();
+}
+
+async function showEndSelection(
+  ctx: BotContext,
+  service: AvailabilityService,
+  config: AppConfig,
+  slotId: string,
+  startTime: string
+) {
+  const slot = await service.getSlotById(slotId);
+  if (!slot) {
+    await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+    return;
+  }
+  const times = service
+    .getTimeOptions()
+    .filter((time) => timeLabelToMinutes(time) > timeLabelToMinutes(startTime));
+  if (!times.length) {
+    await ctx.answerCbQuery('Немає можливих варіантів завершення', { show_alert: true });
+    return;
+  }
+  const rows = times.map((time) => {
+    const label = time === slot.endTime ? `✅ ${time}` : time;
+    return [Markup.button.callback(label, `slot:edit:apply:${slot.id}:${encodeTimeKey(startTime)}:${encodeTimeKey(time)}`)];
+  });
+  rows.push([Markup.button.callback('⬅️ Назад', `slot:view:${slot.id}`)]);
+
+  const text = [
+    '✏️ Редагування слота',
+    `📅 ${formatAdminDate(slot.dateISO, config)}`,
+    `Новий початок: ${startTime}`,
+    `Поточний кінець: ${slot.endTime}`,
+    '',
+    'Оберіть новий час завершення:',
+  ].join('\n');
+
+  await ctx.editMessageText(text, { reply_markup: Markup.inlineKeyboard(rows).reply_markup });
+  await ctx.answerCbQuery();
+}
+
+function buildTimeSelectionKeyboard(times: string[], selected: string, buildData: (time: string) => string) {
+  return times.map((time) => {
+    const label = time === selected ? `✅ ${time}` : time;
+    return [Markup.button.callback(label, buildData(time))];
+  });
+}
+
+function encodeTimeKey(time: string): string {
+  return time.replace(':', '');
+}
+
+function decodeTimeKey(key: string): string {
+  return `${key.slice(0, 2)}:${key.slice(2)}`;
+}
+
+function timeLabelToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map((n) => parseInt(n, 10));
+  return hours * 60 + minutes;
 }
 
 function splitIntoRows<T>(items: T[], size: number): T[][] {
@@ -356,12 +595,8 @@ function buildKeyboard(mode: Mode) {
   return Markup.keyboard(rows).resize();
 }
 
-function getBotSession(ctx: BotContext) {
-  return ctx.session as typeof ctx.session & {
-    mode?: Mode;
-    awaitingBroadcast?: boolean;
-    broadcastDraft?: string;
-  };
+function getBotSession(ctx: BotContext): BotSession {
+  return ctx.session as BotSession;
 }
 
 function buildBroadcastConfirmKeyboard() {

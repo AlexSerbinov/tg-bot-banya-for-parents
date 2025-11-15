@@ -7,6 +7,7 @@ export interface AvailabilitySlot {
   createdBy: number;
   createdAt: string; // ISO string
   note?: string;
+  chanAvailable: boolean;
 }
 
 export interface ScheduleSettings {
@@ -33,4 +34,5 @@ export interface SlotCreationPayload {
   endTime: string;
   note?: string;
   createdBy: number;
+  chanAvailable?: boolean;
 }

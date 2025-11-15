@@ -16,7 +16,11 @@ export class AvailabilityStore {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     try {
       const raw = await fs.readFile(this.filePath, 'utf8');
-      this.slots = JSON.parse(raw) as AvailabilitySlot[];
+      const parsed = JSON.parse(raw) as AvailabilitySlot[];
+      this.slots = parsed.map((slot) => ({
+        ...slot,
+        chanAvailable: slot.chanAvailable !== false,
+      }));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.slots = [];

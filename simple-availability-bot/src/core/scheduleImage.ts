@@ -38,6 +38,7 @@ interface SlotCell {
   rowIndex: number;
   slotStart: Date;
   slotEnd: Date;
+  chanAvailable?: boolean;
 }
 
 interface SlotSegment {
@@ -46,6 +47,7 @@ interface SlotSegment {
   endRow: number;
   slotStart: Date;
   slotEnd: Date;
+  chanAvailable?: boolean;
 }
 
 export interface WeeklyScheduleImageResult {
@@ -116,11 +118,16 @@ export function generateAvailabilityImage({
       const slotStart = toDateAtTime(iso, tick.timeString, settings.timeZone);
       const slotEnd = addMinutes(slotStart, GRID_MINUTE_STEP);
 
+      const slotInfo = (availabilityByDay.get(iso) ?? []).find(
+        (entry) => slotStart >= entry.start && slotEnd <= entry.end
+      );
+
       dayCells[columnIndex].push({
         status,
         rowIndex,
         slotStart,
         slotEnd,
+        chanAvailable: slotInfo?.chanAvailable,
       });
     });
   });
@@ -137,6 +144,9 @@ export function generateAvailabilityImage({
         const cellY = layout.gridY + cell.rowIndex * (layout.rowHeight + layout.rowGap);
         drawSlotCell(ctx, columnX, cellY, layout.columnWidth, layout.rowHeight, cell.status);
         const lines = [buildRangeLabel(cell.slotStart, cell.slotEnd, timeZone)];
+        if (cell.status === 'available') {
+          lines.push(cell.chanAvailable === false ? 'Чан недоступний' : 'Чан доступний');
+        }
         const showStatus = getDurationMinutes(cell.slotStart, cell.slotEnd) > 60;
         drawSlotLabel(
           ctx,
@@ -159,6 +169,10 @@ export function generateAvailabilityImage({
       const segmentHeight =
         rowCount * layout.rowHeight + Math.max(0, rowCount - 1) * layout.rowGap;
       drawSlotCell(ctx, columnX, cellY, layout.columnWidth, segmentHeight, segment.status);
+      const lines = [buildRangeLabel(segment.slotStart, segment.slotEnd, timeZone)];
+      if (segment.status === 'available') {
+        lines.push(segment.chanAvailable === false ? 'Чан недоступний' : 'Чан доступний');
+      }
       drawSlotLabel(
         ctx,
         columnX,
@@ -166,7 +180,7 @@ export function generateAvailabilityImage({
         layout.columnWidth,
         segmentHeight,
         segment.status,
-        [buildRangeLabel(segment.slotStart, segment.slotEnd, timeZone)],
+        lines,
         getDurationMinutes(segment.slotStart, segment.slotEnd) > 60
       );
     });
@@ -607,14 +621,14 @@ function buildLayout(daysCount: number, rowsCount: number) {
 }
 
 function groupAvailability(availability: AvailabilitySlot[], timeZone: string) {
-  const map = new Map<string, Array<{ start: Date; end: Date }>>();
+  const map = new Map<string, Array<{ start: Date; end: Date; chanAvailable: boolean }>>();
   availability.forEach((slot) => {
     const start = toDateAtTime(slot.dateISO, slot.startTime, timeZone);
     const end = toDateAtTime(slot.dateISO, slot.endTime, timeZone);
     if (!map.has(slot.dateISO)) {
       map.set(slot.dateISO, []);
     }
-    map.get(slot.dateISO)!.push({ start, end });
+    map.get(slot.dateISO)!.push({ start, end, chanAvailable: slot.chanAvailable !== false });
   });
 
   map.forEach((entries) => {
@@ -628,7 +642,7 @@ function resolveSlotStatus(
   iso: string,
   timeStr: string,
   settings: ScheduleSettings,
-  availability: Map<string, Array<{ start: Date; end: Date }>>,
+  availability: Map<string, Array<{ start: Date; end: Date; chanAvailable: boolean }>>,
   now: Date
 ): SlotStatus {
   const slotStart = toDateAtTime(iso, timeStr, settings.timeZone);
@@ -648,7 +662,7 @@ function buildSegments(cells: SlotCell[]): SlotSegment[] {
   let current: SlotSegment | null = null;
 
   cells.forEach((cell) => {
-    if (current && current.status === cell.status) {
+    if (current && current.status === cell.status && current.chanAvailable === cell.chanAvailable) {
       current.endRow = cell.rowIndex + 1;
       current.slotEnd = cell.slotEnd;
       return;
@@ -664,6 +678,7 @@ function buildSegments(cells: SlotCell[]): SlotSegment[] {
       endRow: cell.rowIndex + 1,
       slotStart: cell.slotStart,
       slotEnd: cell.slotEnd,
+      chanAvailable: cell.chanAvailable,
     };
   });
 
