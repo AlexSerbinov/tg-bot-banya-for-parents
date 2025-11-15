@@ -352,17 +352,29 @@ async function showSlotsOverview(
   options: { edit?: boolean } = {}
 ) {
   const grouped = await service.listSlotsGrouped();
-  if (!grouped.length) {
+  const now = new Date();
+  const upcoming = grouped
+    .map((group) => ({
+      iso: group.iso,
+      slots: group.slots.filter((slot) => {
+        const end = toDateAtTime(slot.dateISO, slot.endTime, service.timeZone);
+        return end > now;
+      }),
+    }))
+    .filter((group) => group.slots.length > 0);
+
+  if (!upcoming.length) {
+    const message = 'Поки що актуальних слотів немає.';
     if (options.edit) {
-      await ctx.editMessageText('Поки що все зайнято.');
+      await ctx.editMessageText(message);
     } else {
-      await ctx.reply('Поки що все зайнято.');
+      await ctx.reply(message);
     }
     return;
   }
 
-  const text = buildSlotListText(grouped, config);
-  const keyboard = Markup.inlineKeyboard(buildSlotButtons(grouped, config));
+  const text = buildSlotListText(upcoming, config);
+  const keyboard = Markup.inlineKeyboard(buildSlotButtons(upcoming, config));
 
   if (options.edit) {
     await ctx.editMessageText(text, { reply_markup: keyboard.reply_markup });
@@ -395,7 +407,10 @@ function buildSlotListText(
   const blocks = grouped.map((group) => {
     const dayLabel = formatAdminDate(group.iso, config);
     const slots = group.slots
-      .map((slot) => `• ${slot.startTime} – ${slot.endTime}${slot.chanAvailable ? '' : ' (без чану)'}`)
+      .map(
+        (slot) =>
+          `• ${slot.startTime} – ${slot.endTime}${slot.chanAvailable ? '' : ' (без чану)'}`
+      )
       .join('\n');
     return `📅 ${dayLabel}\n${slots}`;
   });
@@ -501,9 +516,11 @@ async function showEndSelection(
     await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
     return;
   }
+  const step = service.getTimeStepMinutes();
+  const startMinutes = timeLabelToMinutes(startTime);
   const times = service
     .getTimeOptions()
-    .filter((time) => timeLabelToMinutes(time) > timeLabelToMinutes(startTime));
+    .filter((time) => timeLabelToMinutes(time) - startMinutes >= step);
   if (!times.length) {
     await ctx.answerCbQuery('Немає можливих варіантів завершення', { show_alert: true });
     return;
