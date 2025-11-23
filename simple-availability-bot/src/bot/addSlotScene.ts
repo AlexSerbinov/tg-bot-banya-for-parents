@@ -9,6 +9,7 @@ const CANCEL_ACTION = 'slot:add:cancel';
 const BACK_ACTION = 'slot:add:back';
 const NEXT_WEEK_ACTION = 'slot:add:nextweek';
 const PREV_WEEK_ACTION = 'slot:add:prevweek';
+const FULL_DAY_ACTION = 'slot:add:fullday';
 
 interface AddSlotWizardState {
   dateISO?: string;
@@ -129,12 +130,14 @@ export function createAddSlotScene(service: AvailabilityService) {
       }
 
       const data = readCallbackData(ctx);
+      console.log('[Handler 2 / Step 3] Received callback data:', data);
       if (!data) {
         await ctx.answerCbQuery();
         return;
       }
 
       const state = getState(ctx);
+      console.log('[Handler 2 / Step 3] Current state:', state);
 
       if (data === CANCEL_ACTION) {
         await handleCancel(ctx, state);
@@ -144,6 +147,95 @@ export function createAddSlotScene(service: AvailabilityService) {
       if (data === BACK_ACTION) {
         await ctx.answerCbQuery();
         return ctx.wizard.selectStep(1);
+      }
+
+      if (data === FULL_DAY_ACTION) {
+        console.log('[FULL_DAY_ACTION] Button pressed');
+        const { dateISO, dateLabel } = state;
+        console.log('[FULL_DAY_ACTION] State:', { dateISO, dateLabel });
+        if (!dateISO) {
+          console.log('[FULL_DAY_ACTION] No dateISO, leaving scene');
+          await ctx.answerCbQuery('Помилка: день не обрано', { show_alert: true });
+          return ctx.scene.leave();
+        }
+
+        try {
+          console.log('[FULL_DAY_ACTION] Creating slots...');
+          await ctx.answerCbQuery('Створюю слоти на весь день...');
+
+          // Створюємо перший слот: 09:00-13:00 без чану (баня топиться)
+          console.log('[FULL_DAY_ACTION] Creating slot 1: 09:00-13:00');
+          const slot1 = await service.addSlotRange({
+            dateISO,
+            startTime: '09:00',
+            endTime: '13:00',
+            createdBy: ctx.from?.id ?? 0,
+            chanAvailable: false,
+          });
+          console.log('[FULL_DAY_ACTION] Slot 1 created:', slot1.id);
+
+          // Створюємо другий слот: 13:00-23:00 з чаном
+          console.log('[FULL_DAY_ACTION] Creating slot 2: 13:00-23:00');
+          const slot2 = await service.addSlotRange({
+            dateISO,
+            startTime: '13:00',
+            endTime: '23:00',
+            createdBy: ctx.from?.id ?? 0,
+            chanAvailable: true,
+          });
+          console.log('[FULL_DAY_ACTION] Slot 2 created:', slot2.id);
+
+          // Показуємо результат
+          console.log('[FULL_DAY_ACTION] Showing result...');
+          const resultText = [
+            '✅ Створено слоти на весь день!',
+            '',
+            `📅 ${dateLabel}`,
+            '',
+            '1️⃣ Ранковий слот:',
+            `⏱ ${slot1.startTime} – ${slot1.endTime}`,
+            `🛁 Чан: недоступний (топиться)`,
+            `⏳ Тривалість: ${(slot1.durationMinutes / 60).toFixed(1)} год.`,
+            '',
+            '2️⃣ Денний/вечірній слот:',
+            `⏱ ${slot2.startTime} – ${slot2.endTime}`,
+            `🛁 Чан: доступний`,
+            `⏳ Тривалість: ${(slot2.durationMinutes / 60).toFixed(1)} год.`,
+          ].join('\n');
+
+          const keyboard = Markup.inlineKeyboard([
+            [Markup.button.callback('➕ Додати ще 1 слот', 'slot:add:another')],
+            [Markup.button.callback('🏠 Головне меню', 'slot:add:done')]
+          ]);
+
+          try {
+            await ctx.telegram.editMessageText(
+              ctx.chat!.id,
+              state.messageId!,
+              undefined,
+              resultText,
+              keyboard
+            );
+          } catch (e) {
+            await ctx.reply(resultText, keyboard);
+          }
+        } catch (error) {
+          console.error('[FULL_DAY_ACTION] Error creating slots:', error);
+          const errorText = error instanceof Error ? error.message : 'Не вдалося створити слоти';
+          try {
+            await ctx.telegram.editMessageText(
+              ctx.chat!.id,
+              state.messageId!,
+              undefined,
+              `❌ ${errorText}`
+            );
+          } catch (e) {
+            await ctx.reply(`❌ ${errorText}`);
+          }
+          return;
+        }
+
+        return ctx.scene.leave();
       }
 
       const match = data.match(/^slot:add:start:(\d{2}:\d{2})$/);
@@ -383,6 +475,10 @@ function buildStartTimesKeyboard(service: AvailabilityService, dateISO: string) 
   const times = getAvailableStartTimes(service, dateISO);
   const buttons = times.map((time) => Markup.button.callback(time, `slot:add:start:${time}`));
   const rows = splitIntoRows(buttons, 3);
+  
+  // Add Full Day shortcut
+  rows.unshift([Markup.button.callback('⚡️ Весь день (09:00 - 23:00)', FULL_DAY_ACTION)]);
+
   rows.push([
     Markup.button.callback('⬅️ Назад', BACK_ACTION),
     Markup.button.callback('❌ Скасувати', CANCEL_ACTION)

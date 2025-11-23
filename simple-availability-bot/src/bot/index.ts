@@ -20,7 +20,7 @@ const ADMIN_MENU = [
 ];
 
 const CLIENT_MENU = [
-  ['🖼 Показати розклад', 'ℹ️ Інформація'],
+  ['🖼 Показати розклад', 'ℹ️ Інформація та ціни'],
   ['📞 Контакти'],
 ];
 
@@ -48,10 +48,12 @@ export function createBot(
   bot.use(stage.middleware());
 
   bot.start(async (ctx) => {
+    console.log('[/start] Command received');
     const initialMode: Mode = isAdmin(ctx.from?.id, config.adminIds) ? 'admin' : 'client';
     getBotSession(ctx).mode = initialMode;
 
     if (initialMode === 'admin') {
+      console.log('[/start] Admin mode');
       await ctx.reply(
         'Вітаю! Режим адміністратора активований. Користуйтеся кнопками нижче.',
         buildKeyboard('admin')
@@ -59,14 +61,19 @@ export function createBot(
       return;
     }
 
+    console.log('[/start] Client mode - sending welcome');
     await ctx.reply(
-      'Привіт! Це бот із розкладом нашої бані. Обирайте потрібний режим нижче 👇',
+      'Ласкаво просимо до нашої бані в Болотні! 🌿',
       buildKeyboard('client')
     );
-    await sendScheduleImage(ctx, service, 'Ось актуальний розклад 👇');
+    console.log('[/start] Client mode - sending schedule');
+    const session = getBotSession(ctx);
+    session.scheduleWeekOffset = 0;
+    await sendScheduleImageWithButton(ctx, service, 0, false, false);
+    console.log('[/start] Client mode - sending info');
     const clientInfo = await settingsStore.getClientInfoText();
     await ctx.reply(clientInfo);
-    await ctx.reply(config.contactMessage);
+    console.log('[/start] Completed');
   });
 
   bot.hears('🎫 Режим клієнта', async (ctx) => {
@@ -96,13 +103,7 @@ export function createBot(
 
   bot.command('addslot', onlyAdmin(config, (ctx) => ctx.scene.enter(ADD_SLOT_SCENE_ID)));
 
-  bot.hears('🗓 Показати розклад', async (ctx) => {
-    const session = getBotSession(ctx);
-    session.scheduleWeekOffset = 0;
-    await sendScheduleImageWithButton(ctx, service, 0, false, false);
-  });
-
-  bot.hears('ℹ️ Інформація', async (ctx) => {
+  bot.hears('ℹ️ Інформація та ціни', async (ctx) => {
     const clientInfo = await settingsStore.getClientInfoText();
     await ctx.reply(clientInfo);
   });
@@ -111,11 +112,12 @@ export function createBot(
     await ctx.reply(config.contactMessage);
   });
 
-  bot.hears('🖼 Показати розклад', onlyAdmin(config, async (ctx) => {
+  bot.hears('🖼 Показати розклад', async (ctx) => {
     const session = getBotSession(ctx);
     session.scheduleWeekOffset = 0;
-    await sendScheduleImageWithButton(ctx, service, 0, false, true);
-  }));
+    const showAllSlots = isAdmin(ctx.from?.id, config.adminIds);
+    await sendScheduleImageWithButton(ctx, service, 0, false, showAllSlots);
+  });
 
   bot.hears('➕ Додати слот', onlyAdmin(config, async (ctx) => {
     console.log('[➕ Додати слот] Button pressed');
@@ -234,6 +236,39 @@ export function createBot(
     );
   }));
 
+  bot.action('admin:clear:all:slots', onlyAdminAction(config, async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.editMessageText(
+      '⚠️ Точно очистити всі слоти?\n\nЦе видалить всі вільні слоти!',
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Так, очистити все', 'admin:clear:all:slots:confirm'),
+          Markup.button.callback('❌ Ні, скасувати', 'admin:clear:all:slots:cancel'),
+        ],
+      ])
+    );
+  }));
+
+  bot.action('admin:clear:all:slots:confirm', onlyAdminAction(config, async (ctx) => {
+    const grouped = await service.listSlotsGrouped();
+    let totalRemoved = 0;
+    for (const group of grouped) {
+      const removed = await service.clearDay(group.iso);
+      totalRemoved += removed;
+    }
+    await ctx.answerCbQuery('Очищено');
+    await ctx.editMessageText(
+      totalRemoved > 0
+        ? `✅ Прибрано всього ${totalRemoved} слот(ів)`
+        : 'Слотів не було'
+    );
+  }));
+
+  bot.action('admin:clear:all:slots:cancel', onlyAdminAction(config, async (ctx) => {
+    await ctx.answerCbQuery('Скасовано');
+    await showSlotsOverview(ctx, service, config, { edit: true });
+  }));
+
   bot.action('slot:add:done', onlyAdminAction(config, async (ctx) => {
     await ctx.answerCbQuery();
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
@@ -336,7 +371,7 @@ export function createBot(
       session.editingSettings = undefined;
       await ctx.reply(
         '✅ Інформаційний текст оновлено!\n\n' +
-        'Тепер клієнти будуть бачити новий текст при натисканні "ℹ️ Інформація".'
+        'Тепер клієнти будуть бачити новий текст при натисканні "ℹ️ Інформація та ціни".'
       );
       return;
     }
@@ -651,7 +686,7 @@ function buildSlotButtons(
   grouped: Array<{ iso: string; slots: AvailabilitySlot[] }>,
   config: AppConfig
 ) {
-  return grouped.flatMap((group) =>
+  const slotButtons = grouped.flatMap((group) =>
     group.slots.map((slot) => {
       const chanIcon = slot.chanAvailable ? ' 🛁' : '';
       return [
@@ -662,6 +697,13 @@ function buildSlotButtons(
       ];
     })
   );
+
+  // Додаємо кнопку "Очистити всі слоти" в кінці
+  slotButtons.push([
+    Markup.button.callback('🧹 Очистити всі слоти', 'admin:clear:all:slots')
+  ]);
+
+  return slotButtons;
 }
 
 async function showSlotDetail(
@@ -873,12 +915,11 @@ function getMode(ctx: BotContext): Mode {
 function buildKeyboard(mode: Mode) {
   const rows: string[][] = [];
 
-  // Показуємо тільки кнопку переключення на інший режим
   if (mode === 'admin') {
     rows.push(['🎫 Режим клієнта']);
     rows.push(...ADMIN_MENU);
   } else {
-    rows.push(['🛠 Режим адміністратора']);
+    // Клієнти бачать тільки CLIENT_MENU без кнопки переключення режиму
     rows.push(...CLIENT_MENU);
   }
 

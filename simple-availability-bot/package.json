@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "dev:pm2": "nodemon --watch src --ext ts --exec 'npm run build && pm2 restart simple-availability-bot'",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js"
   },
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "nodemon": "^3.1.11",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
   }

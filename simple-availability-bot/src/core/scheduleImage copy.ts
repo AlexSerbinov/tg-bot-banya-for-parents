@@ -1,4 +1,4 @@
-import { createCanvas, loadImage, GlobalFonts, type SKRSContext2D } from '@napi-rs/canvas';
+import { createCanvas, GlobalFonts, type SKRSContext2D } from '@napi-rs/canvas';
 import { addMinutes, format } from 'date-fns';
 import { uk } from 'date-fns/locale';
 import { toZonedTime } from 'date-fns-tz';
@@ -14,6 +14,8 @@ function registerCustomFonts() {
 
   const fontsDir = join(process.cwd(), 'fonts');
   try {
+    // Спробуємо завантажити Playfair Display для заголовків (якщо файли є)
+    // Якщо файлів немає, Canvas автоматично використає системний шрифт
     const fontFiles = [
       'PlayfairDisplay-Regular.ttf',
       'PlayfairDisplay-Medium.ttf',
@@ -25,7 +27,7 @@ function registerCustomFonts() {
       try {
         GlobalFonts.registerFromPath(join(fontsDir, file), 'Playfair Display');
       } catch (e) {
-        // Ігноруємо, якщо файлу немає
+        // Ігноруємо помилки відсутності окремих файлів
       }
     });
     
@@ -36,55 +38,45 @@ function registerCustomFonts() {
 }
 
 // --- КОНСТАНТИ ДИЗАЙНУ ---
-const CANVAS_WIDTH = 1400;
-const PADDING_X = 48; 
-const PADDING_Y = 48; 
+const CANVAS_WIDTH = 1200;
+const PADDING_X = 48; // Відступи зліва/справа
+const PADDING_Y = 48; // Відступи зверху/знизу
 
-const HEADER_HEIGHT = 260; // Increased for larger text
-const DAY_HEADER_HEIGHT = 120; // Increased for larger pills
-const TIME_COLUMN_WIDTH = 100; // Slightly wider
-const COLUMN_GAP = 24; // Wider gap
-const BASE_ROW_HEIGHT = 60; 
-const GRID_MINUTE_STEP = 30; 
+// Розміри елементів
+const HEADER_HEIGHT = 160; 
+const DAY_HEADER_HEIGHT = 90;
+const TIME_COLUMN_WIDTH = 90;
+const COLUMN_GAP = 16;
+const BASE_ROW_HEIGHT = 60; // Висота години (для 60 хв)
+const GRID_MINUTE_STEP = 30; // Гранулярність сітки
 
-// --- ПАЛІТРА "PREMIUM WOOD" ---
+// Кольори (Palette: Slate Dark + Emerald/Cyan accents)
 const COLORS = {
-  // Фон буде картинкою, але ці кольори для градієнтів та оверлеїв
-  overlayTop: 'rgba(15, 10, 8, 0.92)',    // Much darker top
-  overlayBottom: 'rgba(5, 2, 1, 0.98)',   // Almost black bottom
-  
+  bgTop: '#0f172a',      // Slate 950
+  bgBottom: '#1e293b',   // Slate 800
+  cardBg: 'rgba(30, 41, 59, 0.5)', // Напівпрозора підкладка
   text: {
-    primary: '#ffffff',   // Pure white for max contrast
-    secondary: '#9ca3af', // Cool grey
-    accent: '#fbbf24',    // Amber
+    primary: '#f8fafc',  // White/Slate 50
+    secondary: '#94a3b8', // Slate 400
+    accent: '#38bdf8',   // Light Blue
   },
-  
-  ui: {
-    headerPill: 'rgba(255, 255, 255, 0.03)', // Very subtle
-    border: 'rgba(255, 255, 255, 0.05)',
-    gridLines: 'rgba(255, 255, 255, 0.03)'
-  },
-
   slots: {
     available: {
-      // Bright Lime (Modern)
-      start: '#bef264', 
-      end: '#84cc16',   
-      shadow: 'rgba(132, 204, 22, 0.4)',
-      text: '#0f172a' // Dark text
+      start: '#10b981', // Emerald 500
+      end: '#047857',   // Emerald 700
+      shadow: 'rgba(16, 185, 129, 0.4)',
+      text: '#ffffff'
     },
     availableChan: {
-      // Bright Cyan (Modern)
-      start: '#67e8f9', 
-      end: '#06b6d4',   
+      start: '#06b6d4', // Cyan 500
+      end: '#0e7490',   // Cyan 700
       shadow: 'rgba(6, 182, 212, 0.4)',
-      text: '#0f172a' // Dark text
+      text: '#ffffff'
     },
     booked: {
-      // Subtle Beige (Village)
-      bg: 'rgba(62, 39, 35, 0.08)', 
-      border: 'rgba(255, 255, 255, 0.1)', // Barely visible
-      text: 'transparent'
+      bg: 'rgba(51, 65, 85, 0.3)', // Slate 700 low opacity
+      border: 'rgba(71, 85, 105, 0.4)',
+      text: '#64748b' // Slate 500
     }
   }
 };
@@ -135,24 +127,26 @@ export async function generateAvailabilityImage({
   const perfStart = performance.now();
 
   if (!days.length) {
-    throw new Error('Не передано жодного дня');
+    throw new Error('Не передано жодного дня для генерації розкладу');
   }
 
+  // 1. Підготовка даних
   const timeTicks = buildTimeTicks(settings.dayOpenTime, settings.dayCloseTime);
   const layout = calculateLayout(days.length, timeTicks.length);
   
+  // 2. Ініціалізація Canvas
   const canvas = createCanvas(CANVAS_WIDTH, layout.totalHeight);
   const ctx = canvas.getContext('2d');
 
-  // 1. ФОН (Дерево + Оверлей)
-  await drawWoodBackground(ctx, CANVAS_WIDTH, layout.totalHeight);
-  
-  // 2. Контент
+  // 3. Малювання основи
+  drawPremiumBackground(ctx, CANVAS_WIDTH, layout.totalHeight);
   drawHeaderSection(ctx, days, settings, layout);
+  
+  // 4. Малювання сітки та колонок
   drawTimeColumn(ctx, timeTicks, layout);
   drawDayHeaders(ctx, days, layout, settings.timeZone);
   
-  // 3. Обрахунок слотів
+  // 5. Обробка доступності
   const availabilityByDay = groupAvailability(availability, settings.timeZone);
   const now = new Date();
   const dayCells = days.map(() => [] as SlotCell[]);
@@ -161,6 +155,7 @@ export async function generateAvailabilityImage({
   days.forEach((day, colIndex) => {
     const iso = dateToISO(day);
     timeTicks.forEach((tick, rowIndex) => {
+      // Останній тік - це час закриття, він не є початком слоту
       if (rowIndex === timeTicks.length - 1) return;
 
       const status = resolveSlotStatus(iso, tick.timeString, settings, availabilityByDay, now);
@@ -173,6 +168,7 @@ export async function generateAvailabilityImage({
         (entry) => slotStart >= entry.start && slotEnd <= entry.end
       );
       
+      // Для зайнятих не прокидаємо chanAvailable, щоб вони зливалися
       const chanAvailable = status === 'booked' ? undefined : slotInfo?.chanAvailable;
 
       dayCells[colIndex].push({
@@ -185,67 +181,47 @@ export async function generateAvailabilityImage({
     });
   });
 
-  // 4. Малювання слотів
+  // 6. Малювання слотів
   dayCells.forEach((cells, colIndex) => {
     const colX = layout.gridX + colIndex * (layout.colWidth + COLUMN_GAP);
+
     if (aggregateSlots) {
       const segments = buildSegments(cells);
       segments.forEach(segment => {
         drawSlotSegment(ctx, segment, colX, layout);
       });
+    } else {
+      cells.forEach(cell => {
+         // Fallback logic if needed (usually aggregate is true)
+         // ... implementation skipped for brevity as default is true
+      });
     }
   });
 
+  // 7. Footer / Watermark
   drawFooter(ctx, layout);
 
   const buffer = canvas.toBuffer('image/png');
-  console.log(`🖼 Schedule (Woody) generated in ${(performance.now() - perfStart).toFixed(1)}ms`);
+  console.log(`🖼 Schedule generated in ${(performance.now() - perfStart).toFixed(1)}ms`);
   
   return { buffer, stats };
 }
 
 // --- ФУНКЦІЇ МАЛЮВАННЯ ---
 
-async function drawWoodBackground(ctx: SKRSContext2D, width: number, height: number) {
-  try {
-    // Шлях до картинки. ПЕРЕКОНАЙСЯ, що файл background.JPG є в папці img
-    // Якщо ім'я файлу інше - зміни його тут
-    const bgPath = join(process.cwd(), 'img', 'background.JPG'); 
-    
-    const image = await loadImage(bgPath);
-    
-    // Малюємо зображення, розтягуючи на весь канвас
-    // Можна використати drawImage так, щоб зберегти пропорції (object-cover),
-    // але для текстури розтягування зазвичай ок.
-    ctx.drawImage(image, 0, 0, width, height);
-
-  } catch (error) {
-    console.warn('⚠️ Failed to load wood background, using gradient fallback:', error);
-    const fallback = ctx.createLinearGradient(0, 0, width, height);
-    fallback.addColorStop(0, '#2e1005'); // Dark wood
-    fallback.addColorStop(1, '#1a0a03');
-    ctx.fillStyle = fallback;
-    ctx.fillRect(0, 0, width, height);
-  }
-
-  // --- ОВЕРЛЕЙ (Vignette + Darkening) ---
-  // Це критично важливо для читабельності тексту на текстурі
-  const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  
-  // Зверху світліше, щоб було видно кільця дерева
-  gradient.addColorStop(0, COLORS.overlayTop); 
-  // В зоні заголовка трохи темнішаємо
-  gradient.addColorStop(0.2, 'rgba(20, 10, 5, 0.85)');
-  // Внизу (де таблиця) дуже темно, щоб контраст був максимальний
-  gradient.addColorStop(1, COLORS.overlayBottom);
+function drawPremiumBackground(ctx: SKRSContext2D, width: number, height: number) {
+  // Градієнтний фон (Dark Slate Theme)
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, COLORS.bgTop);
+  gradient.addColorStop(1, COLORS.bgBottom);
   
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  // Додаємо трохи "шуму" або рамку для стилю
-  ctx.strokeStyle = COLORS.ui.border;
+  // Тонка рамка навколо всього зображення (опціонально)
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
   ctx.lineWidth = 2;
-  ctx.strokeRect(20, 20, width - 40, height - 40);
+  ctx.strokeRect(1, 1, width - 2, height - 2);
 }
 
 function drawHeaderSection(
@@ -256,74 +232,65 @@ function drawHeaderSection(
 ) {
   const rangeLabel = formatRange(days, settings.timeZone);
   
+  // Title
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   
-  // Тінь для тексту, щоб він відривався від фону
-  ctx.shadowColor = 'rgba(0,0,0,0.8)';
-  ctx.shadowBlur = 15;
-  ctx.shadowOffsetY = 4;
-
-  // Заголовок
-  ctx.font = '700 60px "Playfair Display", Georgia, serif';
+  // Використовуємо кастомний шрифт якщо є, або Georgia як fallback
+  ctx.font = '700 48px "Playfair Display", Georgia, serif';
   ctx.fillStyle = COLORS.text.primary;
   ctx.fillText('Вільні години бані', PADDING_X, PADDING_Y);
 
-  // Скидаємо сильну тінь
-  ctx.shadowBlur = 4;
-  ctx.shadowOffsetY = 2;
-
-  // Subtitle
-  ctx.font = '400 32px "Inter", sans-serif';
+  // Subtitle (Period)
+  ctx.font = '400 28px "Playfair Display", Georgia, serif';
   ctx.fillStyle = COLORS.text.secondary;
-  ctx.fillText('Період: ', PADDING_X, PADDING_Y + 80);
+  ctx.fillText('Період: ', PADDING_X, PADDING_Y + 60);
   
   const periodWidth = ctx.measureText('Період: ').width;
-  ctx.fillStyle = COLORS.text.primary;
-  ctx.fillText(rangeLabel, PADDING_X + periodWidth, PADDING_Y + 80);
+  ctx.fillStyle = COLORS.text.accent;
+  ctx.fillText(rangeLabel, PADDING_X + periodWidth, PADDING_Y + 60);
 
-  ctx.font = '500 24px "Inter", sans-serif'; 
+  // Subtitle (Hours)
+  ctx.font = '500 20px "Inter", sans-serif'; // Inter or system sans
   ctx.fillStyle = COLORS.text.secondary;
-  ctx.fillText(`Графік роботи: ${settings.dayOpenTime} – ${settings.dayCloseTime}`, PADDING_X, PADDING_Y + 125);
+  ctx.fillText(`Графік роботи: ${settings.dayOpenTime} – ${settings.dayCloseTime}`, PADDING_X, PADDING_Y + 100);
 
-  ctx.shadowColor = 'transparent'; // Reset shadow
-  
-  // Legend moved to top right (below header)
-  drawLegend(ctx, PADDING_X, PADDING_Y + 170);
+  // Legend (Top Right or Inline)
+  drawLegend(ctx, CANVAS_WIDTH - PADDING_X, PADDING_Y + 10);
 }
 
-function drawLegend(ctx: SKRSContext2D, leftX: number, topY: number) {
+function drawLegend(ctx: SKRSContext2D, rightX: number, topY: number) {
   const items = [
-    { color: COLORS.slots.available.end, label: 'Баня' },
-    { color: COLORS.slots.availableChan.end, label: 'Баня + Чан' },
-    { color: '#8d6e63', label: 'Зайнято' }
+    { label: 'Вільно', color: COLORS.slots.available.start },
+    { label: 'Баня + Чан', color: COLORS.slots.availableChan.start },
+    { label: 'Зайнято', color: '#475569' } // Slate 600
   ];
 
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.font = '600 30px "Inter", sans-serif'; // Larger font
+  ctx.textAlign = 'right';
+  ctx.font = '600 18px sans-serif';
+  
+  let currentY = topY;
+  
+  // Малюємо легенду горизонтально справа наліво або блоком
+  // Тут зробимо горизонтальний ряд
+  let currentX = rightX;
 
-  let currentX = leftX;
-  const centerY = topY;
-
-  items.forEach((item) => {
-    // Dot
-    ctx.save();
-    ctx.shadowColor = item.color;
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.arc(currentX + 16, centerY, 16, 0, Math.PI * 2); // Larger dot (16px radius)
-    ctx.fillStyle = item.color;
-    if (item.label === 'Зайнято') ctx.globalAlpha = 0.5;
-    ctx.fill();
-    ctx.restore();
-    
+  // Малюємо в зворотному порядку, бо вирівнювання right
+  [...items].reverse().forEach((item, idx) => {
     // Label
     ctx.fillStyle = COLORS.text.secondary;
-    ctx.fillText(item.label, currentX + 45, centerY);
+    ctx.fillText(item.label, currentX, currentY + 8);
     
     const labelWidth = ctx.measureText(item.label).width;
-    currentX += (labelWidth + 80); // More spacing
+    
+    // Dot
+    ctx.beginPath();
+    ctx.arc(currentX - labelWidth - 16, currentY + 5, 8, 0, Math.PI * 2);
+    ctx.fillStyle = item.color;
+    ctx.fill();
+    
+    // Відступ для наступного елементу
+    currentX -= (labelWidth + 48);
   });
 }
 
@@ -334,24 +301,18 @@ function drawTimeColumn(
 ) {
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  ctx.font = '500 32px "Inter", sans-serif'; // Larger time font (32px)
+  ctx.font = '500 20px "Inter", sans-serif'; // Моноширинний або чіткий санс виглядає краще для цифр
   ctx.fillStyle = COLORS.text.secondary;
 
-  const rowHeight = layout.rowHeight;
+  const rowHeight = layout.rowHeight; // висота клітинки (30 хв)
 
   ticks.forEach((tick, idx) => {
+    // Малюємо лише повні години (кожен другий тік, якщо крок 30 хв)
     if (tick.label) {
+      // Y координата - це початок рядка
       const y = layout.gridY + (idx * rowHeight); 
-      // Додаємо ледь помітну лінію на всю ширину
-      ctx.save();
-      ctx.strokeStyle = COLORS.ui.gridLines;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(PADDING_X + TIME_COLUMN_WIDTH, y);
-      ctx.lineTo(CANVAS_WIDTH - PADDING_X, y);
-      ctx.stroke();
-      ctx.restore();
-
+      // Центруємо мітку відносно висоти ГОДИНИ (тобто 2 клітинки по 30 хв)
+      // Але щоб було простіше, просто малюємо навпроти лінії
       ctx.fillText(tick.label, PADDING_X + TIME_COLUMN_WIDTH - 24, y);
     }
   });
@@ -367,43 +328,31 @@ function drawDayHeaders(
 
   days.forEach((day, index) => {
     const colX = layout.gridX + index * (layout.colWidth + COLUMN_GAP);
-    const centerX = colX + layout.colWidth / 2;
+    const dayName = formatDateInZone(day, timeZone, 'EEEEEE').toUpperCase(); // СБ, НД
+    const dateNum = formatDateInZone(day, timeZone, 'dd'); // 22
     
-    // Stacked Header:
-    // DAY (ПН)
-    // DATE (24)
-    // MONTH (лис)
+    // Background Pill for Header
+    ctx.fillStyle = 'rgba(30, 41, 59, 0.6)'; // Slate 800 semi-transparent
+    ctx.strokeStyle = 'rgba(71, 85, 105, 0.5)';
+    ctx.lineWidth = 1;
     
-    const dayName = formatDateInZone(day, timeZone, 'EEEEEE').toUpperCase();
-    const dateNum = formatDateInZone(day, timeZone, 'd');
-    const monthName = formatDateInZone(day, timeZone, 'MMM').toLowerCase();
-
-    const pillX = colX;
-    const pillWidth = layout.colWidth;
-    
-    // Subtle header background
-    ctx.fillStyle = COLORS.ui.headerPill;
     ctx.beginPath();
-    ctx.roundRect(pillX, startY, pillWidth, DAY_HEADER_HEIGHT - 10, 12);
+    ctx.roundRect(colX, startY + 10, layout.colWidth, DAY_HEADER_HEIGHT - 20, 16);
     ctx.fill();
+    ctx.stroke();
 
+    // Text
     ctx.textAlign = 'center';
     
-    // 1. Day Name
-    ctx.textBaseline = 'top';
-    ctx.font = '600 18px "Inter", sans-serif'; // Larger
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillText(dayName, centerX, startY + 16);
+    // Day Name
+    ctx.font = '600 14px sans-serif';
+    ctx.fillStyle = COLORS.text.secondary;
+    ctx.fillText(dayName, colX + layout.colWidth / 2, startY + 32);
 
-    // 2. Date Number
-    ctx.font = '700 36px "Inter", sans-serif'; // Larger
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(dateNum, centerX, startY + 42);
-
-    // 3. Month
-    ctx.font = '500 16px "Inter", sans-serif'; // Larger
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillText(monthName, centerX, startY + 82);
+    // Date Number
+    ctx.font = '700 26px "Playfair Display", Georgia, serif';
+    ctx.fillStyle = COLORS.text.primary;
+    ctx.fillText(dateNum, colX + layout.colWidth / 2, startY + 62);
   });
 }
 
@@ -417,36 +366,50 @@ function drawSlotSegment(
   const height = rowCount * layout.rowHeight;
   const y = layout.gridY + segment.startRow * layout.rowHeight;
   
+  // Відступ між блоками (щоб вони не злипалися візуально)
   const GAP = 4; 
   const drawHeight = height - GAP;
   const drawY = y + GAP / 2;
-  const radius = 8; // Менш округлі кути для "суворого" стилю
 
+  const radius = 12;
 
   if (segment.status === 'booked') {
-    // Booked - Subtle Beige Box (Village Style)
+    // --- BOOKED STYLE (Subtle, Dark) ---
     ctx.fillStyle = COLORS.slots.booked.bg;
     ctx.strokeStyle = COLORS.slots.booked.border;
-    ctx.setLineDash([4, 4]); 
     ctx.lineWidth = 1;
 
     ctx.beginPath();
     ctx.roundRect(x, drawY, layout.colWidth, drawHeight, radius);
     ctx.fill();
     ctx.stroke();
-    ctx.setLineDash([]); 
+
+    // Вертикальний текст "Зайнято" якщо блок великий
+    if (drawHeight > 100) {
+      ctx.save();
+      ctx.translate(x + layout.colWidth / 2, drawY + drawHeight / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '500 16px sans-serif';
+      ctx.fillStyle = 'rgba(148, 163, 184, 0.4)'; // Дуже тьмяний
+      ctx.fillText('ЗАЙНЯТО', 0, 0);
+      ctx.restore();
+    }
 
   } else {
-    // Available - Bright Modern Colors
+    // --- AVAILABLE STYLE (Vibrant, Card-like) ---
     const isChan = segment.status === 'available_with_chan';
     const style = isChan ? COLORS.slots.availableChan : COLORS.slots.available;
 
+    // Shadow / Glow
     ctx.save();
     ctx.shadowColor = style.shadow;
-    ctx.shadowBlur = 15;
-    ctx.shadowOffsetY = 5;
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 8;
     
-    const gradient = ctx.createLinearGradient(x, drawY, x, drawY + drawHeight);
+    // Gradient Background
+    const gradient = ctx.createLinearGradient(x, drawY, x + layout.colWidth, drawY + drawHeight);
     gradient.addColorStop(0, style.start);
     gradient.addColorStop(1, style.end);
     
@@ -454,55 +417,58 @@ function drawSlotSegment(
     ctx.beginPath();
     ctx.roundRect(x, drawY, layout.colWidth, drawHeight, radius);
     ctx.fill();
+    
+    // Reset shadow for text
     ctx.restore(); 
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    // Inner Border (Highlight)
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Labels
+    // --- TEXT LABELS ---
     const duration = getDurationMinutes(segment.slotStart, segment.slotEnd);
     const centerX = x + layout.colWidth / 2;
     const centerY = drawY + drawHeight / 2;
 
-    ctx.fillStyle = style.text; // Dark text on bright slots
+    ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
+    // Для коротких слотів (30-60 хв)
     if (duration <= 60) {
-      ctx.font = '700 22px sans-serif'; // Larger
-      const timeLabel = `${formatTime(segment.slotStart)}-${formatTime(segment.slotEnd)}`;
-      ctx.fillText(timeLabel, centerX, centerY - 10);
-      
-      ctx.font = '800 20px sans-serif'; // Larger
-      const labelText = isChan ? 'БАНЯ+ЧАН' : 'БАНЯ';
-      ctx.fillText(labelText, centerX, centerY + 12);
-    } else {
+      ctx.font = '700 16px sans-serif';
+      const timeLabel = `${formatTime(segment.slotStart)} - ${formatTime(segment.slotEnd)}`;
+      ctx.fillText(timeLabel, centerX, centerY);
+    } 
+    // Для середніх та довгих слотів
+    else {
+      // Time Range (Large)
       ctx.textBaseline = 'bottom';
-      ctx.font = '700 24px sans-serif'; // Larger
-      ctx.fillText(formatTime(segment.slotStart), centerX, centerY - 5);
+      ctx.font = '700 22px sans-serif';
+      ctx.fillText(formatTime(segment.slotStart), centerX, centerY - 4);
       
       ctx.textBaseline = 'top';
-      ctx.font = '600 22px sans-serif'; // Larger
-      ctx.globalAlpha = 0.8;
-      ctx.fillText(formatTime(segment.slotEnd), centerX, centerY + 5);
+      ctx.font = '500 16px sans-serif';
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(formatTime(segment.slotEnd), centerX, centerY + 4);
       ctx.globalAlpha = 1;
 
-      if (drawHeight > 130) {
-        let fontSize = 32;
-        ctx.font = `800 ${fontSize}px sans-serif`;
+      // Type Label (Bottom)
+      if (drawHeight > 140) {
+        ctx.font = 'bold 12px sans-serif';
         const labelText = isChan ? 'БАНЯ + ЧАН' : 'ВІЛЬНО';
         
-        // Dynamic scaling to fit width
-        const maxWidth = layout.colWidth - 16; // Padding
-        while (ctx.measureText(labelText).width > maxWidth && fontSize > 14) {
-          fontSize -= 2;
-          ctx.font = `800 ${fontSize}px sans-serif`;
-        }
-        
-        // Draw pill behind text for extra contrast if needed, but with dark text on bright bg it should be fine.
-        // Let's just draw text.
-        ctx.fillText(labelText, centerX, drawY + drawHeight - 40);
+        // Малюємо пігулку під текстом
+        const textWidth = ctx.measureText(labelText).width;
+        const pad = 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath();
+        ctx.roundRect(centerX - textWidth/2 - pad, drawY + drawHeight - 32, textWidth + pad*2, 22, 11);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.fillText(labelText, centerX, drawY + drawHeight - 32 + 6); // +6 для центрування по Y в пігулці
       }
     }
   }
@@ -511,16 +477,15 @@ function drawSlotSegment(
 function drawFooter(ctx: SKRSContext2D, layout: ReturnType<typeof calculateLayout>) {
   const y = layout.totalHeight - 24;
   
-  // Line
   ctx.beginPath();
   ctx.moveTo(PADDING_X, y - 20);
   ctx.lineTo(CANVAS_WIDTH - PADDING_X, y - 20);
-  ctx.strokeStyle = COLORS.ui.border;
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
   ctx.stroke();
 
   ctx.textAlign = 'left';
   ctx.font = '400 14px sans-serif';
-  ctx.fillStyle = 'rgba(214, 211, 209, 0.5)'; // Warm grey semi-transparent
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.5)';
   ctx.fillText('@simple_availability_bot', PADDING_X, y);
 
   ctx.textAlign = 'right';
@@ -530,9 +495,11 @@ function drawFooter(ctx: SKRSContext2D, layout: ReturnType<typeof calculateLayou
 // --- HELPER LOGIC ---
 
 function calculateLayout(daysCount: number, timeTicksCount: number) {
-  const rowsCount = timeTicksCount - 1; 
+  // Висота сітки: кількість рядків (30-хвилинних) * висота рядка
+  const rowsCount = timeTicksCount - 1; // останній тік - це кінець, не рядок
   const gridHeight = rowsCount * (BASE_ROW_HEIGHT * (GRID_MINUTE_STEP / 60));
   
+  // Доступна ширина для колонок днів
   const availableWidth = CANVAS_WIDTH - (PADDING_X * 2) - TIME_COLUMN_WIDTH;
   const colWidth = (availableWidth - (COLUMN_GAP * (daysCount - 1))) / daysCount;
 
@@ -555,7 +522,7 @@ function buildTimeTicks(openTime: string, closeTime: string): TimeTick[] {
   for (let m = openMinutes; m <= closeMinutes; m += GRID_MINUTE_STEP) {
     ticks.push({
       timeString: minutesToLabel(m),
-      label: m % 60 === 0 ? minutesToLabel(m) : '' 
+      label: m % 60 === 0 ? minutesToLabel(m) : '' // Показуємо тільки повні години
     });
   }
   return ticks;
@@ -641,6 +608,8 @@ function formatDateInZone(date: Date, timeZone: string, pattern: string): string
 }
 
 function formatTime(date: Date): string {
+  // Ми вже працюємо з Date об'єктами, які коректні відносно початку генерації,
+  // але тут для форматування краще просто брати години/хвилини
   return format(date, 'HH:mm');
 }
 

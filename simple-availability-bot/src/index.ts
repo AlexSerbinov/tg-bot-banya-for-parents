@@ -12,6 +12,17 @@ async function bootstrap() {
   const settingsStore = new SettingsStore(appConfig.settingsStorageFile);
   const bot = createBot(appConfig, service, userStore, settingsStore);
 
+  // Встановлюємо опис бота (показується перед натисканням START)
+  try {
+    await bot.telegram.setMyDescription(
+      'Ласкаво просимо до нашої бані та чану в Болотні 🌿\n' +
+      'Тут ви зможете подивитися вільні години та забронювати баню й чан.'
+    );
+    console.log('✅ Опис бота встановлено');
+  } catch (error) {
+    console.error('⚠️ Не вдалося встановити опис бота:', error);
+  }
+
   await bot.launch();
   console.log('🚀 Simple availability bot запущено');
 

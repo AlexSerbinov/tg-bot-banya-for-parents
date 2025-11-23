@@ -162,7 +162,24 @@ export class AvailabilityService {
     existing.forEach((slot) => {
       const existingStart = toDateAtTime(slot.dateISO, slot.startTime, this.timeZone);
       const existingEnd = toDateAtTime(slot.dateISO, slot.endTime, this.timeZone);
+
+      // Check if they touch or overlap
       if (rangesTouchOrOverlap(mergedStart, mergedEnd, existingStart, existingEnd)) {
+        // If Chan availability differs, we CANNOT merge
+        const newChan = payload.chanAvailable ?? true;
+        const existingChan = slot.chanAvailable !== false; // default true
+
+        if (newChan !== existingChan) {
+          // If they strictly OVERLAP, it's a conflict
+          if (rangesOverlap(mergedStart, mergedEnd, existingStart, existingEnd)) {
+             throw new Error('Неможливо створити слот: перетин з іншим типом доступності (чан)');
+          }
+          // If they just TOUCH, we treat them as separate slots (do not merge)
+          keep.push(slot);
+          return;
+        }
+
+        // If Chan status is same, we merge
         mergedStart = new Date(Math.min(mergedStart.getTime(), existingStart.getTime()));
         mergedEnd = new Date(Math.max(mergedEnd.getTime(), existingEnd.getTime()));
         return;

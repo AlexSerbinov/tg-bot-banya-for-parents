@@ -36,14 +36,14 @@ function registerCustomFonts() {
 }
 
 // --- КОНСТАНТИ ДИЗАЙНУ ---
-const CANVAS_WIDTH = 1400;
+const CANVAS_WIDTH = 1200;
 const PADDING_X = 48; 
 const PADDING_Y = 48; 
 
-const HEADER_HEIGHT = 260; // Increased for larger text
-const DAY_HEADER_HEIGHT = 120; // Increased for larger pills
-const TIME_COLUMN_WIDTH = 100; // Slightly wider
-const COLUMN_GAP = 24; // Wider gap
+const HEADER_HEIGHT = 160; 
+const DAY_HEADER_HEIGHT = 90;
+const TIME_COLUMN_WIDTH = 90;
+const COLUMN_GAP = 16;
 const BASE_ROW_HEIGHT = 60; 
 const GRID_MINUTE_STEP = 30; 
 
@@ -67,23 +67,23 @@ const COLORS = {
 
   slots: {
     available: {
-      // Bright Lime (Modern)
-      start: '#bef264', 
-      end: '#84cc16',   
+      // Bright Lime/Green - Pops against dark
+      start: '#bef264', // Lime 300
+      end: '#84cc16',   // Lime 500
       shadow: 'rgba(132, 204, 22, 0.4)',
-      text: '#0f172a' // Dark text
+      text: '#0f172a'   // Dark text on bright slot
     },
     availableChan: {
-      // Bright Cyan (Modern)
-      start: '#67e8f9', 
-      end: '#06b6d4',   
+      // Bright Cyan/Sky
+      start: '#67e8f9', // Cyan 300
+      end: '#06b6d4',   // Cyan 500
       shadow: 'rgba(6, 182, 212, 0.4)',
-      text: '#0f172a' // Dark text
+      text: '#0f172a'   // Dark text
     },
     booked: {
-      // Subtle Beige (Village)
-      bg: 'rgba(62, 39, 35, 0.08)', 
-      border: 'rgba(255, 255, 255, 0.1)', // Barely visible
+      // Invisible / Transparent
+      bg: 'transparent', 
+      border: 'transparent',
       text: 'transparent'
     }
   }
@@ -265,7 +265,7 @@ function drawHeaderSection(
   ctx.shadowOffsetY = 4;
 
   // Заголовок
-  ctx.font = '700 60px "Playfair Display", Georgia, serif';
+  ctx.font = '700 52px "Playfair Display", Georgia, serif';
   ctx.fillStyle = COLORS.text.primary;
   ctx.fillText('Вільні години бані', PADDING_X, PADDING_Y);
 
@@ -274,56 +274,55 @@ function drawHeaderSection(
   ctx.shadowOffsetY = 2;
 
   // Subtitle
-  ctx.font = '400 32px "Inter", sans-serif';
+  ctx.font = '400 24px "Inter", sans-serif';
   ctx.fillStyle = COLORS.text.secondary;
-  ctx.fillText('Період: ', PADDING_X, PADDING_Y + 80);
+  ctx.fillText('Період: ', PADDING_X, PADDING_Y + 70);
   
   const periodWidth = ctx.measureText('Період: ').width;
   ctx.fillStyle = COLORS.text.primary;
-  ctx.fillText(rangeLabel, PADDING_X + periodWidth, PADDING_Y + 80);
+  ctx.fillText(rangeLabel, PADDING_X + periodWidth, PADDING_Y + 70);
 
-  ctx.font = '500 24px "Inter", sans-serif'; 
+  ctx.font = '500 18px "Inter", sans-serif'; 
   ctx.fillStyle = COLORS.text.secondary;
-  ctx.fillText(`Графік роботи: ${settings.dayOpenTime} – ${settings.dayCloseTime}`, PADDING_X, PADDING_Y + 125);
+  ctx.fillText(`Графік роботи: ${settings.dayOpenTime} – ${settings.dayCloseTime}`, PADDING_X, PADDING_Y + 105);
 
   ctx.shadowColor = 'transparent'; // Reset shadow
   
-  // Legend moved to top right (below header)
-  drawLegend(ctx, PADDING_X, PADDING_Y + 170);
+  // Legend moved to top right
+  drawLegend(ctx, CANVAS_WIDTH - PADDING_X, PADDING_Y + 10);
 }
 
-function drawLegend(ctx: SKRSContext2D, leftX: number, topY: number) {
+function drawLegend(ctx: SKRSContext2D, rightX: number, topY: number) {
   const items = [
     { color: COLORS.slots.available.end, label: 'Баня' },
     { color: COLORS.slots.availableChan.end, label: 'Баня + Чан' },
-    { color: '#8d6e63', label: 'Зайнято' }
+    // Removed "Booked" from legend as it's now invisible
   ];
 
-  ctx.textAlign = 'left';
+  ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  ctx.font = '600 30px "Inter", sans-serif'; // Larger font
+  ctx.font = '600 18px "Inter", sans-serif';
 
-  let currentX = leftX;
-  const centerY = topY;
+  let currentX = rightX;
+  const centerY = topY + 10;
 
-  items.forEach((item) => {
+  items.reverse().forEach((item) => {
+    // Label
+    ctx.fillStyle = COLORS.text.secondary;
+    ctx.fillText(item.label, currentX, centerY);
+    const labelWidth = ctx.measureText(item.label).width;
+    
     // Dot
     ctx.save();
     ctx.shadowColor = item.color;
     ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.arc(currentX + 16, centerY, 16, 0, Math.PI * 2); // Larger dot (16px radius)
+    ctx.arc(currentX - labelWidth - 12, centerY, 6, 0, Math.PI * 2);
     ctx.fillStyle = item.color;
-    if (item.label === 'Зайнято') ctx.globalAlpha = 0.5;
     ctx.fill();
     ctx.restore();
     
-    // Label
-    ctx.fillStyle = COLORS.text.secondary;
-    ctx.fillText(item.label, currentX + 45, centerY);
-    
-    const labelWidth = ctx.measureText(item.label).width;
-    currentX += (labelWidth + 80); // More spacing
+    currentX -= (labelWidth + 40);
   });
 }
 
@@ -334,7 +333,7 @@ function drawTimeColumn(
 ) {
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  ctx.font = '500 32px "Inter", sans-serif'; // Larger time font (32px)
+  ctx.font = '500 20px "Inter", sans-serif'; 
   ctx.fillStyle = COLORS.text.secondary;
 
   const rowHeight = layout.rowHeight;
@@ -391,19 +390,19 @@ function drawDayHeaders(
     
     // 1. Day Name
     ctx.textBaseline = 'top';
-    ctx.font = '600 18px "Inter", sans-serif'; // Larger
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillText(dayName, centerX, startY + 16);
+    ctx.font = '600 13px "Inter", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText(dayName, centerX, startY + 12);
 
     // 2. Date Number
-    ctx.font = '700 36px "Inter", sans-serif'; // Larger
+    ctx.font = '700 28px "Inter", sans-serif';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(dateNum, centerX, startY + 42);
+    ctx.fillText(dateNum, centerX, startY + 32);
 
     // 3. Month
-    ctx.font = '500 16px "Inter", sans-serif'; // Larger
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillText(monthName, centerX, startY + 82);
+    ctx.font = '500 14px "Inter", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText(monthName, centerX, startY + 64);
   });
 }
 
@@ -424,20 +423,11 @@ function drawSlotSegment(
 
 
   if (segment.status === 'booked') {
-    // Booked - Subtle Beige Box (Village Style)
-    ctx.fillStyle = COLORS.slots.booked.bg;
-    ctx.strokeStyle = COLORS.slots.booked.border;
-    ctx.setLineDash([4, 4]); 
-    ctx.lineWidth = 1;
-
-    ctx.beginPath();
-    ctx.roundRect(x, drawY, layout.colWidth, drawHeight, radius);
-    ctx.fill();
-    ctx.stroke();
-    ctx.setLineDash([]); 
-
+    // Do NOTHING for booked slots. 
+    // This creates negative space which is much cleaner.
+    return;
   } else {
-    // Available - Bright Modern Colors
+    // Available - Vibrant Nature colors
     const isChan = segment.status === 'available_with_chan';
     const style = isChan ? COLORS.slots.availableChan : COLORS.slots.available;
 
@@ -446,7 +436,7 @@ function drawSlotSegment(
     ctx.shadowBlur = 15;
     ctx.shadowOffsetY = 5;
     
-    const gradient = ctx.createLinearGradient(x, drawY, x, drawY + drawHeight);
+    const gradient = ctx.createLinearGradient(x, drawY, x + layout.colWidth, drawY + drawHeight);
     gradient.addColorStop(0, style.start);
     gradient.addColorStop(1, style.end);
     
@@ -456,7 +446,7 @@ function drawSlotSegment(
     ctx.fill();
     ctx.restore(); 
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
@@ -465,44 +455,38 @@ function drawSlotSegment(
     const centerX = x + layout.colWidth / 2;
     const centerY = drawY + drawHeight / 2;
 
-    ctx.fillStyle = style.text; // Dark text on bright slots
+    ctx.fillStyle = COLORS.slots.available.text; // Dark text
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     if (duration <= 60) {
-      ctx.font = '700 22px sans-serif'; // Larger
-      const timeLabel = `${formatTime(segment.slotStart)}-${formatTime(segment.slotEnd)}`;
-      ctx.fillText(timeLabel, centerX, centerY - 10);
-      
-      ctx.font = '800 20px sans-serif'; // Larger
-      const labelText = isChan ? 'БАНЯ+ЧАН' : 'БАНЯ';
-      ctx.fillText(labelText, centerX, centerY + 12);
+      ctx.font = '700 16px sans-serif';
+      const timeLabel = `${formatTime(segment.slotStart)} - ${formatTime(segment.slotEnd)}`;
+      ctx.fillText(timeLabel, centerX, centerY);
     } else {
       ctx.textBaseline = 'bottom';
-      ctx.font = '700 24px sans-serif'; // Larger
-      ctx.fillText(formatTime(segment.slotStart), centerX, centerY - 5);
+      ctx.font = '700 22px sans-serif';
+      ctx.fillText(formatTime(segment.slotStart), centerX, centerY - 3);
       
       ctx.textBaseline = 'top';
-      ctx.font = '600 22px sans-serif'; // Larger
-      ctx.globalAlpha = 0.8;
-      ctx.fillText(formatTime(segment.slotEnd), centerX, centerY + 5);
+      ctx.font = '500 16px sans-serif';
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(formatTime(segment.slotEnd), centerX, centerY + 3);
       ctx.globalAlpha = 1;
 
       if (drawHeight > 130) {
-        let fontSize = 32;
-        ctx.font = `800 ${fontSize}px sans-serif`;
+        ctx.font = 'bold 11px sans-serif';
         const labelText = isChan ? 'БАНЯ + ЧАН' : 'ВІЛЬНО';
         
-        // Dynamic scaling to fit width
-        const maxWidth = layout.colWidth - 16; // Padding
-        while (ctx.measureText(labelText).width > maxWidth && fontSize > 14) {
-          fontSize -= 2;
-          ctx.font = `800 ${fontSize}px sans-serif`;
-        }
-        
-        // Draw pill behind text for extra contrast if needed, but with dark text on bright bg it should be fine.
-        // Let's just draw text.
-        ctx.fillText(labelText, centerX, drawY + drawHeight - 40);
+        const textWidth = ctx.measureText(labelText).width;
+        const pad = 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath();
+        ctx.roundRect(centerX - textWidth/2 - pad, drawY + drawHeight - 28, textWidth + pad*2, 20, 6);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.fillText(labelText, centerX, drawY + drawHeight - 28 + 5);
       }
     }
   }

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дизайн Розкладу Бані</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif; /* Для технічного тексту */
+        }
+        h1, h2, .serif-font {
+            font-family: 'Playfair Display', serif; /* Для заголовків - преміум вигляд */
+        }
+        /* Імітація розміру Canvas 1200px */
+        .canvas-container {
+            width: 1200px; 
+            height: auto; /* Або фіксована, як у коді */
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            position: relative;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4 overflow-auto">
+
+    <!-- Це контейнер, який імітує картинку, що генеруватиме бот -->
+    <div class="canvas-container rounded-[32px] shadow-2xl p-8 text-white">
+        
+        <!-- Header Section -->
+        <div class="flex justify-between items-start mb-8 pl-4 pr-8">
+            <div>
+                <h1 class="text-5xl font-bold mb-3 tracking-wide serif-font text-white">Вільні години бані</h1>
+                <div class="flex items-center gap-4">
+                    <p class="text-2xl text-blue-200 serif-font">Період: <span class="text-white font-semibold">22 листоп. – 28 листоп.</span></p>
+                    <span class="text-slate-500 text-xl">•</span>
+                    <p class="text-xl text-slate-400">Графік роботи: 09:00 – 23:00</p>
+                </div>
+            </div>
+            
+            <!-- Легенда винесена нагору для ясності -->
+            <div class="bg-slate-800/50 px-6 py-3 rounded-2xl border border-slate-700/50 backdrop-blur-sm flex gap-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-4 h-4 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.6)]"></div>
+                    <span class="text-lg font-medium text-slate-200">Вільно (баня)</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="w-4 h-4 rounded-full bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.6)]"></div>
+                    <span class="text-lg font-medium text-slate-200">Баня + Чан</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="w-4 h-4 rounded-full bg-slate-700 border border-slate-600"></div>
+                    <span class="text-lg font-medium text-slate-400">Зайнято</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Grid Area -->
+        <div class="relative bg-slate-900/40 rounded-3xl p-6 border border-slate-700/30">
+            
+            <div class="flex">
+                <!-- Time Column (Left Axis) -->
+                <div class="flex flex-col pr-6 pt-[78px] gap-[34px] text-right">
+                    <!-- Імітуємо крок часу. Використовуємо великий шрифт для 40+ -->
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">09:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">10:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">11:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">12:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">13:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">14:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">15:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">16:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">17:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">18:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">19:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">20:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">21:00</div>
+                    <div class="h-6 text-xl font-medium text-slate-400 font-mono">22:00</div>
+                </div>
+
+                <!-- Days Columns -->
+                <div class="flex-1 grid grid-cols-7 gap-3">
+                    
+                    <!-- Day 1 (СБ) - Full Busy Example -->
+                    <div class="flex flex-col gap-4">
+                        <div class="text-center bg-slate-800/80 rounded-xl py-3 border border-slate-700">
+                            <div class="text-sm uppercase tracking-widest text-slate-400 font-semibold">СБ</div>
+                            <div class="text-2xl font-bold text-white mt-1">22</div>
+                        </div>
+                        <!-- Busy Column -->
+                        <div class="flex-1 rounded-xl bg-slate-800/40 border border-slate-700/30 flex items-center justify-center relative overflow-hidden group">
+                            <!-- Штриховка для зайнятого -->
+                            <div class="absolute inset-0 opacity-10" style="background-image: linear-gradient(45deg, #ffffff 25%, transparent 25%, transparent 50%, #ffffff 50%, #ffffff 75%, transparent 75%, transparent); background-size: 20px 20px;"></div>
+                            <span class="text-slate-500 font-medium rotate-[-90deg] whitespace-nowrap text-lg">Зайнято</span>
+                        </div>
+                    </div>
+
+                    <!-- Day 2 (НД) - Mixed Example -->
+                    <div class="flex flex-col gap-4 relative">
+                        <div class="text-center bg-slate-800/80 rounded-xl py-3 border border-slate-700">
+                            <div class="text-sm uppercase tracking-widest text-slate-400 font-semibold">НД</div>
+                            <div class="text-2xl font-bold text-white mt-1">23</div>
+                        </div>
+                        
+                        <!-- Grid container relative -->
+                        <div class="flex-1 relative h-[810px]"> <!-- Висота підібрана умовно -->
+                            
+                            <!-- 09:00 - 11:00 Busy -->
+                            <div class="absolute top-0 w-full bg-slate-800/40 border border-slate-700/30 rounded-lg flex items-center justify-center" style="height: 110px;">
+                            </div>
+
+                            <!-- 11:00 - 13:00 FREE (Chan) -->
+                            <div class="absolute top-[116px] w-full bg-gradient-to-br from-cyan-500 to-cyan-700 rounded-xl shadow-lg shadow-cyan-900/50 flex flex-col items-center justify-center z-10 border border-cyan-400/50" style="height: 110px;">
+                                <span class="text-2xl font-bold leading-none mb-1">11:00</span>
+                                <span class="text-lg opacity-90 leading-none mb-2">13:00</span>
+                                <span class="text-xs uppercase font-bold bg-white/20 px-2 py-1 rounded">Баня+Чан</span>
+                            </div>
+
+                            <!-- 13:00 - 15:00 Busy -->
+                            <div class="absolute top-[232px] w-full bg-slate-800/40 border border-slate-700/30 rounded-lg" style="height: 110px;"></div>
+
+                             <!-- 15:00 - 18:30 FREE (No Chan) -->
+                             <div class="absolute top-[348px] w-full bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-xl shadow-lg shadow-emerald-900/50 flex flex-col items-center justify-center z-10 border border-emerald-400/50" style="height: 200px;">
+                                <span class="text-2xl font-bold leading-none mb-1">15:00</span>
+                                <span class="text-lg opacity-90 leading-none mb-2">18:30</span>
+                                <span class="text-sm font-medium">Вільно</span>
+                            </div>
+
+                            <!-- Rest Busy -->
+                            <div class="absolute bottom-0 w-full bg-slate-800/40 border border-slate-700/30 rounded-lg" style="top: 554px; bottom: 0;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Day 3 (ПН) - Empty/Busy -->
+                    <div class="flex flex-col gap-4">
+                        <div class="text-center bg-slate-800/80 rounded-xl py-3 border border-slate-700">
+                            <div class="text-sm uppercase tracking-widest text-slate-400 font-semibold">ПН</div>
+                            <div class="text-2xl font-bold text-white mt-1">24</div>
+                        </div>
+                        <div class="flex-1 rounded-xl bg-slate-800/40 border border-slate-700/30"></div>
+                    </div>
+
+                     <!-- Day 4 (ВТ) -->
+                     <div class="flex flex-col gap-4">
+                        <div class="text-center bg-slate-800/80 rounded-xl py-3 border border-slate-700">
+                            <div class="text-sm uppercase tracking-widest text-slate-400 font-semibold">ВТ</div>
+                            <div class="text-2xl font-bold text-white mt-1">25</div>
+                        </div>
+                        <div class="flex-1 rounded-xl bg-slate-800/40 border border-slate-700/30"></div>
+                    </div>
+
+                     <!-- Day 5 (СР) - Free Evening -->
+                     <div class="flex flex-col gap-4 relative">
+                        <div class="text-center bg-slate-800/80 rounded-xl py-3 border border-slate-700">
+                            <div class="text-sm uppercase tracking-widest text-slate-400 font-semibold">СР</div>
+                            <div class="text-2xl font-bold text-white mt-1">26</div>
+                        </div>
+                         <!-- Grid container relative -->
+                         <div class="flex-1 relative h-[810px]">
+                            <!-- Morning Busy -->
+                            <div class="absolute top-0 w-full bg-slate-800/40 border border-slate-700/30 rounded-lg" style="height: 550px;"></div>
+                            
+                            <!-- 18:30 - 23:00 FREE -->
+                            <div class="absolute w-full bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-xl shadow-lg shadow-emerald-900/50 flex flex-col items-center justify-center z-10 border border-emerald-400/50" style="top: 556px; bottom: 0;">
+                                <span class="text-2xl font-bold leading-none mb-1">18:30</span>
+                                <span class="text-lg opacity-90 leading-none mb-2">23:00</span>
+                                <span class="text-sm font-medium">Вільно</span>
+                            </div>
+                         </div>
+                    </div>
+
+                     <!-- Day 6 (ЧТ) -->
+                     <div class="flex flex-col gap-4">
+                        <div class="text-center bg-slate-800/80 rounded-xl py-3 border border-slate-700">
+                            <div class="text-sm uppercase tracking-widest text-slate-400 font-semibold">ЧТ</div>
+                            <div class="text-2xl font-bold text-white mt-1">27</div>
+                        </div>
+                        <div class="flex-1 rounded-xl bg-slate-800/40 border border-slate-700/30"></div>
+                    </div>
+
+                     <!-- Day 7 (ПТ) -->
+                     <div class="flex flex-col gap-4">
+                        <div class="text-center bg-slate-800/80 rounded-xl py-3 border border-slate-700">
+                            <div class="text-sm uppercase tracking-widest text-slate-400 font-semibold">ПТ</div>
+                            <div class="text-2xl font-bold text-white mt-1">28</div>
+                        </div>
+                        <div class="flex-1 rounded-xl bg-slate-800/40 border border-slate-700/30"></div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer / Watermark -->
+        <div class="mt-6 flex justify-between items-end opacity-40">
+            <div class="text-sm text-slate-400">@simple_availability_bot</div>
+            <div class="h-1 flex-1 mx-6 bg-slate-800 rounded-full"></div>
+            <div class="text-sm text-slate-400">Оновлено: 22.11 23:55</div>
+        </div>
+    </div>
+
+</body>
+</html>

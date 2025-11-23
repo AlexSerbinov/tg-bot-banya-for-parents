@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1200, initial-scale=1">
+    <title>Розклад Бані - Rustic Style</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Roboto+Slab:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Скидання стилів */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            /* Імітація розміру канвасу */
+            width: 1200px;
+            height: 1000px; 
+            margin: 0 auto;
+            background-color: #2c1810; /* Колір заглушка, якщо картинка не провантажиться */
+            font-family: 'Roboto Slab', serif; /* Шрифт для основного тексту */
+        }
+
+        /* Основний контейнер з фоном дерева */
+        .canvas-wrapper {
+            position: relative;
+            width: 1200px;
+            min-height: 1000px; /* Адаптується під контент */
+            overflow: hidden;
+            /* ТУТ ТВОЯ КАРТИНКА ДЕРЕВА ЯК ФОН */
+            /* В реальному коді canvas це буде drawImage */
+            background-image: url('https://i.imgur.com/w2e3s4z.jpeg'); /* Я завантажив твоє фото на хостинг для прикладу */
+            background-size: cover;
+            background-position: center;
+            padding: 40px;
+        }
+
+        /* Ефект затемнення фону для кращого контрасту */
+        .bg-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(20, 10, 5, 0.4); /* Легке затемнення дерева */
+            z-index: 1;
+        }
+
+        /* "Паперова" картка */
+        .card {
+            position: relative;
+            z-index: 2;
+            background-color: #fdfbf7; /* Колір старого паперу / слонової кістки */
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            padding: 40px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Заголовок */
+        .header {
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e2d9d0;
+            padding-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .title-group h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: 56px;
+            font-weight: 700;
+            color: #3e2723; /* Темно-коричневий */
+            margin-bottom: 10px;
+            line-height: 1;
+        }
+
+        .title-group p {
+            font-size: 24px;
+            color: #5d4037;
+            margin-bottom: 5px;
+        }
+
+        .highlight {
+            color: #d84315; /* Теракотовий акцент */
+            font-weight: 600;
+        }
+
+        /* Легенда */
+        .legend {
+            display: flex;
+            gap: 40px;
+            margin-bottom: 30px;
+            font-family: 'Playfair Display', serif;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            font-size: 22px;
+            color: #3e2723;
+            font-weight: 600;
+        }
+
+        .dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .dot.green { background: linear-gradient(135deg, #7cb342 0%, #558b2f 100%); }
+        .dot.blue { background: linear-gradient(135deg, #26a69a 0%, #00695c 100%); }
+        .dot.grey { background: #8d6e63; opacity: 0.5; }
+
+        /* Сітка розкладу */
+        .schedule-grid {
+            display: grid;
+            grid-template-columns: 80px repeat(7, 1fr); /* Час + 7 днів */
+            gap: 15px;
+            flex-grow: 1;
+        }
+
+        /* Колонка часу */
+        .time-col {
+            display: flex;
+            flex-direction: column;
+            padding-top: 70px; /* Відступ під шапку днів */
+            gap: 10px; /* Відступ між мітками часу, має співпадати з висотою рядків */
+        }
+
+        .time-label {
+            height: 60px; /* Висота однієї години */
+            display: flex;
+            align-items: start;
+            justify-content: flex-end;
+            padding-right: 15px;
+            font-size: 18px;
+            font-weight: 600;
+            color: #8d6e63;
+            font-family: 'Playfair Display', serif;
+        }
+
+        /* Колонка дня */
+        .day-col {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .day-header {
+            height: 60px;
+            background: #efebe9;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #3e2723;
+            border: 1px solid #d7ccc8;
+        }
+
+        .day-name {
+            font-size: 14px;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: #795548;
+        }
+
+        .day-date {
+            font-size: 22px;
+            font-weight: 700;
+            font-family: 'Playfair Display', serif;
+        }
+
+        /* Слоти */
+        .slots-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px; /* Маленький відступ між годинами */
+            position: relative;
+        }
+
+        .slot {
+            width: 100%;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+            /* Тінь тексту для читабельності */
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2); 
+        }
+
+        /* Типи слотів */
+        
+        /* 1. Зайнято (Empty/Ghost) */
+        .slot.booked {
+            height: 60px; /* 1 година */
+            background: rgba(62, 39, 35, 0.08); /* Дуже прозорий коричневий */
+            border: 1px dashed #d7ccc8;
+            color: transparent;
+            box-shadow: none;
+        }
+        
+        /* Якщо підряд зайнято, вони зливаються візуально */
+        
+        /* 2. Вільна БАНЯ */
+        .slot.free-sauna {
+            background: linear-gradient(180deg, #7cb342 0%, #558b2f 100%);
+            border: 1px solid #33691e;
+        }
+
+        /* 3. Вільна БАНЯ + ЧАН */
+        .slot.free-chan {
+            background: linear-gradient(180deg, #26a69a 0%, #00695c 100%);
+            border: 1px solid #004d40;
+        }
+
+        /* Текст всередині слота */
+        .slot-time {
+            font-size: 16px;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+        
+        .slot-status {
+            font-family: 'Playfair Display', serif;
+            font-size: 20px;
+            font-weight: 700;
+            line-height: 1.1;
+        }
+
+        .slot-sub {
+            font-size: 13px;
+            font-weight: 400;
+            opacity: 0.9;
+            font-style: italic;
+        }
+
+        /* Декоративний елемент "Гілочка" (опціонально) */
+        .deco-leaf {
+            position: absolute;
+            top: 40px;
+            right: 40px;
+            font-size: 60px;
+            opacity: 0.1;
+            color: #3e2723;
+            transform: rotate(15deg);
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="canvas-wrapper">
+    <div class="bg-overlay"></div>
+    
+    <div class="card">
+        <!-- Header -->
+        <div class="header">
+            <div class="title-group">
+                <h1>Вільні години бані</h1>
+                <p>Період: <span class="highlight">22 лист. – 28 лист.</span></p>
+                <p style="font-size: 18px; color: #8d6e63;">Графік роботи: 09:00 – 23:00</p>
+            </div>
+            <!-- Декорація -->
+            <div style="font-size: 80px; opacity: 0.8;">🌿</div>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-item">
+                <div class="dot green"></div>
+                <span>Вільно (Баня)</span>
+            </div>
+            <div class="legend-item">
+                <div class="dot blue"></div>
+                <span>Вільно (Баня + Чан)</span>
+            </div>
+            <div class="legend-item">
+                <div class="dot grey"></div>
+                <span style="color: #a1887f">Зайнято</span>
+            </div>
+        </div>
+
+        <!-- Grid Layout -->
+        <div class="schedule-grid">
+            
+            <!-- Time Column -->
+            <div class="time-col">
+                <div class="time-label">09:00</div>
+                <div class="time-label">10:00</div>
+                <div class="time-label">11:00</div>
+                <div class="time-label">12:00</div>
+                <div class="time-label">13:00</div>
+                <div class="time-label">14:00</div>
+                <div class="time-label">15:00</div>
+                <div class="time-label">16:00</div>
+                <div class="time-label">17:00</div>
+                <div class="time-label">18:00</div>
+                <div class="time-label">19:00</div>
+                <div class="time-label">20:00</div>
+                <div class="time-label">21:00</div>
+                <div class="time-label">22:00</div>
+            </div>
+
+            <!-- Day 1: Saturday -->
+            <div class="day-col">
+                <div class="day-header">
+                    <div class="day-name">СБ</div>
+                    <div class="day-date">22</div>
+                </div>
+                <div class="slots-container">
+                    <!-- Booked full day -->
+                    <div class="slot booked" style="height: 860px;"></div>
+                </div>
+            </div>
+
+            <!-- Day 2: Sunday (Mixed) -->
+            <div class="day-col">
+                <div class="day-header">
+                    <div class="day-name">НД</div>
+                    <div class="day-date">23</div>
+                </div>
+                <div class="slots-container">
+                    <div class="slot booked" style="height: 120px;"></div> <!-- 09-11 -->
+                    
+                    <!-- Slot: Sauna + Chan -->
+                    <div class="slot free-chan" style="height: 120px;"> <!-- 11-13 (2 hours) -->
+                        <div class="slot-time">11:00 – 13:00</div>
+                        <div class="slot-status">ВІЛЬНО</div>
+                        <div class="slot-sub">баня + чан</div>
+                    </div>
+
+                    <div class="slot booked" style="height: 120px;"></div> <!-- 13-15 -->
+
+                    <!-- Slot: Sauna Only -->
+                    <div class="slot free-sauna" style="height: 210px;"> <!-- 15:00 - 18:30 (3.5h) -->
+                        <div class="slot-time">15:00 – 18:30</div>
+                        <div class="slot-status">ВІЛЬНО</div>
+                        <div class="slot-sub">баня</div>
+                    </div>
+                    
+                    <div class="slot booked" style="height: 270px;"></div> <!-- Remainder -->
+                </div>
+            </div>
+
+            <!-- Day 3: Monday -->
+            <div class="day-col">
+                <div class="day-header">
+                    <div class="day-name">ПН</div>
+                    <div class="day-date">24</div>
+                </div>
+                <div class="slots-container">
+                    <div class="slot booked" style="height: 860px;"></div>
+                </div>
+            </div>
+
+             <!-- Day 4: Tuesday -->
+             <div class="day-col">
+                <div class="day-header">
+                    <div class="day-name">ВТ</div>
+                    <div class="day-date">25</div>
+                </div>
+                <div class="slots-container">
+                    <div class="slot booked" style="height: 860px;"></div>
+                </div>
+            </div>
+
+             <!-- Day 5 -->
+             <div class="day-col">
+                <div class="day-header">
+                    <div class="day-name">СР</div>
+                    <div class="day-date">26</div>
+                </div>
+                <div class="slots-container">
+                    <div class="slot booked" style="height: 860px;"></div>
+                </div>
+            </div>
+
+             <!-- Day 6 -->
+             <div class="day-col">
+                <div class="day-header">
+                    <div class="day-name">ЧТ</div>
+                    <div class="day-date">27</div>
+                </div>
+                <div class="slots-container">
+                     <!-- Big Free Slot Example -->
+                     <div class="slot free-sauna" style="height: 300px;"> <!-- 09:00 - 14:00 -->
+                        <div class="slot-time">09:00 – 14:00</div>
+                        <div class="slot-status">ВІЛЬНО</div>
+                        <div class="slot-sub">баня</div>
+                    </div>
+                    <div class="slot booked" style="height: 560px;"></div>
+                </div>
+            </div>
+
+             <!-- Day 7 -->
+             <div class="day-col">
+                <div class="day-header">
+                    <div class="day-name">ПТ</div>
+                    <div class="day-date">28</div>
+                </div>
+                <div class="slots-container">
+                    <div class="slot booked" style="height: 860px;"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
