@@ -1,9 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AvailabilitySlot } from '../types';
+import { Booking } from '../types';
+import { PerfLogger } from '../utils/perfLogger';
 
 export class AvailabilityStore {
-  private slots: AvailabilitySlot[] = [];
+  private slots: Booking[] = [];
   private initialized = false;
 
   constructor(private readonly filePath: string) {}
@@ -16,10 +17,10 @@ export class AvailabilityStore {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     try {
       const raw = await fs.readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(raw) as AvailabilitySlot[];
+      const parsed = JSON.parse(raw) as Booking[];
       this.slots = parsed.map((slot) => ({
         ...slot,
-        chanAvailable: slot.chanAvailable !== false,
+        withChan: slot.withChan !== undefined ? slot.withChan : false,
       }));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -34,26 +35,31 @@ export class AvailabilityStore {
   }
 
   private async persist(): Promise<void> {
+    const end = PerfLogger.start('STORE: persist');
     const payload = JSON.stringify(this.slots, null, 2);
     await fs.writeFile(this.filePath, payload, 'utf8');
+    end();
   }
 
-  async list(): Promise<AvailabilitySlot[]> {
+  async list(): Promise<Booking[]> {
+    const end = PerfLogger.start('STORE: list');
     await this.ensureLoaded();
-    return [...this.slots].sort((a, b) => {
+    const result = [...this.slots].sort((a, b) => {
       if (a.dateISO !== b.dateISO) {
         return a.dateISO.localeCompare(b.dateISO);
       }
       return a.startTime.localeCompare(b.startTime);
     });
+    end();
+    return result;
   }
 
-  async listByDate(dateISO: string): Promise<AvailabilitySlot[]> {
+  async listByDate(dateISO: string): Promise<Booking[]> {
     const all = await this.list();
     return all.filter((slot) => slot.dateISO === dateISO);
   }
 
-  async add(slot: AvailabilitySlot): Promise<void> {
+  async add(slot: Booking): Promise<void> {
     await this.ensureLoaded();
     this.slots.push(slot);
     await this.persist();
@@ -80,7 +86,7 @@ export class AvailabilityStore {
     return before - this.slots.length;
   }
 
-  async setSlotsForDate(dateISO: string, slots: AvailabilitySlot[]): Promise<void> {
+  async setSlotsForDate(dateISO: string, slots: Booking[]): Promise<void> {
     await this.ensureLoaded();
     this.slots = this.slots.filter((slot) => slot.dateISO !== dateISO).concat(slots);
     await this.persist();

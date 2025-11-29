@@ -1,4 +1,4 @@
-export interface AvailabilitySlot {
+export interface Booking {
   id: string;
   dateISO: string; // yyyy-MM-dd
   startTime: string; // HH:mm
@@ -7,7 +7,8 @@ export interface AvailabilitySlot {
   createdBy: number;
   createdAt: string; // ISO string
   note?: string;
-  chanAvailable: boolean;
+  withChan: boolean;
+  chanAvailable?: boolean; // Alias для зворотної сумісності
 }
 
 export interface ScheduleSettings {
@@ -29,15 +30,21 @@ export interface AppConfig {
   settingsStorageFile: string;
 }
 
-export interface SlotCreationPayload {
+export interface BookingCreationPayload {
   dateISO: string;
   startTime: string;
   endTime: string;
   note?: string;
   createdBy: number;
-  chanAvailable?: boolean;
+  withChan?: boolean;
+  chanAvailable?: boolean; // Alias для зворотної сумісності
+  forceChan?: boolean; // Дозволити чан навіть якщо він вже зайнятий на інших бронюваннях
 }
 
 export interface BotSettings {
   clientInfoText: string;
 }
+
+// Alias для зворотної сумісності
+export type AvailabilitySlot = Booking;
+export type SlotCreationPayload = BookingCreationPayload;

@@ -1,12 +1,21 @@
-import { format, parse, addDays, startOfDay } from 'date-fns';
+import { format, addDays, startOfDay } from 'date-fns';
 import { uk } from 'date-fns/locale';
-import { fromZonedTime, toZonedTime } from 'date-fns-tz';
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 
 export function toDateAtTime(dateISO: string, timeStr: string, tz: string): Date {
-  const [hours, minutes] = timeStr.split(':').map((n) => parseInt(n, 10));
-  const date = parse(dateISO, 'yyyy-MM-dd', new Date());
-  date.setHours(hours, minutes, 0, 0);
-  return fromZonedTime(date, tz);
+  // Handle 24:00 as 00:00 of the next day
+  if (timeStr === '24:00') {
+    const nextDay = addDays(new Date(dateISO), 1);
+    const nextDayISO = format(nextDay, 'yyyy-MM-dd');
+    const dateTimeStr = `${nextDayISO}T00:00:00`;
+    return fromZonedTime(dateTimeStr, tz);
+  }
+
+  // Construct a string that looks like "2024-11-24T09:00:00"
+  const dateTimeStr = `${dateISO}T${timeStr}:00`;
+  // fromZonedTime takes a date string (or Date) and a time zone,
+  // and returns a Date object (UTC) representing that wall-clock time in that zone.
+  return fromZonedTime(dateTimeStr, tz);
 }
 
 export function formatDate(date: Date, tz: string): string {

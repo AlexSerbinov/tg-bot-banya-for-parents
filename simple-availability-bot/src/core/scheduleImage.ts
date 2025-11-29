@@ -4,8 +4,9 @@ import { uk } from 'date-fns/locale';
 import { toZonedTime } from 'date-fns-tz';
 import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
-import { AvailabilitySlot, ScheduleSettings } from '../types';
+import { Booking, ScheduleSettings } from '../types';
 import { dateToISO, toDateAtTime } from '../utils/time';
+import { PerfLogger } from '../utils/perfLogger';
 
 // --- КОНФІГУРАЦІЯ ШРИФТІВ ---
 let fontsRegistered = false;
@@ -89,7 +90,7 @@ const COLORS = {
   }
 };
 
-type SlotStatus = 'available' | 'available_with_chan' | 'booked';
+type SlotStatus = 'available' | 'available_with_chan' | 'booked' | 'available_mixed';
 
 interface TimeTick {
   timeString: string;
@@ -105,7 +106,7 @@ interface SlotCell {
 }
 
 interface SlotSegment {
-  status: SlotStatus;
+  status: SlotStatus | 'mixed';
   startRow: number;
   endRow: number;
   slotStart: Date;
@@ -121,22 +122,23 @@ export interface WeeklyScheduleImageResult {
 interface GenerateImageArgs {
   days: Date[];
   settings: ScheduleSettings;
-  availability: AvailabilitySlot[];
+  bookings: Booking[];
   aggregateSlots?: boolean;
 }
 
 export async function generateAvailabilityImage({
   days,
   settings,
-  availability,
+  bookings,
   aggregateSlots = true,
 }: GenerateImageArgs): Promise<WeeklyScheduleImageResult> {
-  registerCustomFonts();
-  const perfStart = performance.now();
+  const end = PerfLogger.start('IMAGE: generateAvailabilityImage');
+  try {
+    registerCustomFonts();
 
-  if (!days.length) {
-    throw new Error('Не передано жодного дня');
-  }
+    if (!days.length) {
+      throw new Error('Не передано жодного дня');
+    }
 
   const timeTicks = buildTimeTicks(settings.dayOpenTime, settings.dayCloseTime);
   const layout = calculateLayout(days.length, timeTicks.length);
@@ -153,27 +155,23 @@ export async function generateAvailabilityImage({
   drawDayHeaders(ctx, days, layout, settings.timeZone);
   
   // 3. Обрахунок слотів
-  const availabilityByDay = groupAvailability(availability, settings.timeZone);
+  const bookingsByDay = groupBookings(bookings, settings.timeZone);
   const now = new Date();
   const dayCells = days.map(() => [] as SlotCell[]);
-  const stats: Record<SlotStatus, number> = { available: 0, available_with_chan: 0, booked: 0 };
+  const stats: Record<SlotStatus, number> = { available: 0, available_with_chan: 0, booked: 0, available_mixed: 0 };
 
   days.forEach((day, colIndex) => {
     const iso = dateToISO(day);
     timeTicks.forEach((tick, rowIndex) => {
       if (rowIndex === timeTicks.length - 1) return;
 
-      const status = resolveSlotStatus(iso, tick.timeString, settings, availabilityByDay, now);
+      const status = resolveSlotStatus(iso, tick.timeString, settings, bookingsByDay, now);
       stats[status] += 1;
 
       const slotStart = toDateAtTime(iso, tick.timeString, settings.timeZone);
       const slotEnd = addMinutes(slotStart, GRID_MINUTE_STEP);
       
-      const slotInfo = (availabilityByDay.get(iso) ?? []).find(
-        (entry) => slotStart >= entry.start && slotEnd <= entry.end
-      );
-      
-      const chanAvailable = status === 'booked' ? undefined : slotInfo?.chanAvailable;
+      const chanAvailable = status === 'available_with_chan';
 
       dayCells[colIndex].push({
         status,
@@ -191,23 +189,27 @@ export async function generateAvailabilityImage({
     if (aggregateSlots) {
       const segments = buildSegments(cells);
       segments.forEach(segment => {
-        drawSlotSegment(ctx, segment, colX, layout);
+        drawSlotSegment(ctx, segment, colX, layout, settings.timeZone);
       });
     }
   });
 
   drawFooter(ctx, layout);
 
-  const buffer = canvas.toBuffer('image/png');
-  console.log(`🖼 Schedule (Woody) generated in ${(performance.now() - perfStart).toFixed(1)}ms`);
-  
-  return { buffer, stats };
+    const buffer = canvas.toBuffer('image/png');
+    
+    return { buffer, stats };
+  } finally {
+    end();
+  }
 }
 
 // --- ФУНКЦІЇ МАЛЮВАННЯ ---
 
 async function drawWoodBackground(ctx: SKRSContext2D, width: number, height: number) {
+  const end = PerfLogger.start('IMAGE: drawWoodBackground');
   try {
+    try {
     // Шлях до картинки. ПЕРЕКОНАЙСЯ, що файл background.JPG є в папці img
     // Якщо ім'я файлу інше - зміни його тут
     const bgPath = join(process.cwd(), 'img', 'background.JPG'); 
@@ -242,10 +244,12 @@ async function drawWoodBackground(ctx: SKRSContext2D, width: number, height: num
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  // Додаємо трохи "шуму" або рамку для стилю
-  ctx.strokeStyle = COLORS.ui.border;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(20, 20, width - 40, height - 40);
+    ctx.strokeStyle = COLORS.ui.border;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(20, 20, width - 40, height - 40);
+  } finally {
+    end();
+  }
 }
 
 function drawHeaderSection(
@@ -294,9 +298,9 @@ function drawHeaderSection(
 
 function drawLegend(ctx: SKRSContext2D, leftX: number, topY: number) {
   const items = [
-    { color: COLORS.slots.available.end, label: 'Баня' },
-    { color: COLORS.slots.availableChan.end, label: 'Баня + Чан' },
-    { color: '#8d6e63', label: 'Зайнято' }
+    { color: COLORS.slots.available.end, label: 'Вільно - лише баня без чану' },
+    { color: COLORS.slots.availableChan.end, label: 'Вільно - баня і чан' },
+    { color: 'rgba(127, 29, 29, 0.9)', label: 'Зайнято' }
   ];
 
   ctx.textAlign = 'left';
@@ -411,7 +415,8 @@ function drawSlotSegment(
   ctx: SKRSContext2D,
   segment: SlotSegment,
   x: number,
-  layout: ReturnType<typeof calculateLayout>
+  layout: ReturnType<typeof calculateLayout>,
+  timeZone: string
 ) {
   const rowCount = segment.endRow - segment.startRow;
   const height = rowCount * layout.rowHeight;
@@ -425,30 +430,83 @@ function drawSlotSegment(
 
   if (segment.status === 'booked') {
     // Booked - Subtle Beige Box (Village Style)
-    ctx.fillStyle = COLORS.slots.booked.bg;
-    ctx.strokeStyle = COLORS.slots.booked.border;
-    ctx.setLineDash([4, 4]); 
+    // Booked - Red/Dark "Unavailable" style
+    ctx.fillStyle = 'rgba(127, 29, 29, 0.9)'; // Dark Red
+    ctx.strokeStyle = 'rgba(254, 202, 202, 0.3)'; // Light Red border
     ctx.lineWidth = 1;
 
     ctx.beginPath();
     ctx.roundRect(x, drawY, layout.colWidth, drawHeight, radius);
     ctx.fill();
     ctx.stroke();
-    ctx.setLineDash([]); 
+
+    // Text "НЕДОСТУПНО"
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    if (drawHeight > 30) {
+      ctx.font = '700 16px "Inter", sans-serif';
+      const centerX = x + layout.colWidth / 2;
+      const centerY = drawY + drawHeight / 2;
+      ctx.fillText('НЕДОСТУПНО', centerX, centerY);
+    } 
 
   } else {
-    // Available - Bright Modern Colors
-    const isChan = segment.status === 'available_with_chan';
-    const style = isChan ? COLORS.slots.availableChan : COLORS.slots.available;
-
+    // Available or Mixed
     ctx.save();
-    ctx.shadowColor = style.shadow;
+    
+    // Determine gradient colors
+    let gradient;
+    if (segment.status === 'mixed') {
+      // Gradient from Green (No Chan) to Blue (With Chan)
+      // Transition happens around 12:00 - 13:00
+      
+      // Calculate relative position of 12:00 and 13:00 within the segment
+      const segmentStart = segment.slotStart.getTime();
+      const segmentEnd = segment.slotEnd.getTime();
+      const duration = segmentEnd - segmentStart;
+      
+      // Get 12:00 and 13:00 timestamps for this day
+      // We can use toDateAtTime helper but we need the date string.
+      // Let's extract date from segment.slotStart
+      const dateISO = dateToISO(segment.slotStart);
+      const t12 = toDateAtTime(dateISO, '12:00', timeZone).getTime();
+      const t13 = toDateAtTime(dateISO, '13:00', timeZone).getTime();
+
+      const startRel = Math.max(0, Math.min(1, (t12 - segmentStart) / duration));
+      const endRel = Math.max(0, Math.min(1, (t13 - segmentStart) / duration));
+      
+      gradient = ctx.createLinearGradient(x, drawY, x, drawY + drawHeight);
+      
+      // Start with Green
+      gradient.addColorStop(0, COLORS.slots.available.start);
+      if (startRel > 0) {
+          gradient.addColorStop(startRel, COLORS.slots.available.end);
+      }
+      
+      // Transition to Blue
+      if (endRel < 1) {
+          gradient.addColorStop(endRel, COLORS.slots.availableChan.start);
+      }
+      gradient.addColorStop(1, COLORS.slots.availableChan.end);
+      
+      ctx.shadowColor = COLORS.slots.availableChan.shadow; // Use blue shadow for mixed
+
+    } else {
+      // Standard single color
+      const isChan = segment.status === 'available_with_chan';
+      const style = isChan ? COLORS.slots.availableChan : COLORS.slots.available;
+      
+      gradient = ctx.createLinearGradient(x, drawY, x, drawY + drawHeight);
+      gradient.addColorStop(0, style.start);
+      gradient.addColorStop(1, style.end);
+      
+      ctx.shadowColor = style.shadow;
+    }
+
     ctx.shadowBlur = 15;
     ctx.shadowOffsetY = 5;
-    
-    const gradient = ctx.createLinearGradient(x, drawY, x, drawY + drawHeight);
-    gradient.addColorStop(0, style.start);
-    gradient.addColorStop(1, style.end);
     
     ctx.fillStyle = gradient;
     ctx.beginPath();
@@ -465,44 +523,108 @@ function drawSlotSegment(
     const centerX = x + layout.colWidth / 2;
     const centerY = drawY + drawHeight / 2;
 
-    ctx.fillStyle = style.text; // Dark text on bright slots
+    // Determine text color - usually dark for available slots
+    ctx.fillStyle = COLORS.slots.available.text; 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     if (duration <= 60) {
-      ctx.font = '700 22px sans-serif'; // Larger
-      const timeLabel = `${formatTime(segment.slotStart)}-${formatTime(segment.slotEnd)}`;
+      ctx.font = '700 22px sans-serif'; 
+      const timeLabel = `${formatTime(segment.slotStart, timeZone)}-${formatTime(segment.slotEnd, timeZone)}`;
       ctx.fillText(timeLabel, centerX, centerY - 10);
       
-      ctx.font = '800 20px sans-serif'; // Larger
-      const labelText = isChan ? 'БАНЯ+ЧАН' : 'БАНЯ';
+      ctx.font = '800 20px sans-serif'; 
+      let labelText = 'БАНЯ';
+      if (segment.status === 'available_with_chan') labelText = 'БАНЯ+ЧАН';
+      if (segment.status === 'mixed') labelText = 'ВІЛЬНО';
       ctx.fillText(labelText, centerX, centerY + 12);
     } else {
-      ctx.textBaseline = 'bottom';
-      ctx.font = '700 24px sans-serif'; // Larger
-      ctx.fillText(formatTime(segment.slotStart), centerX, centerY - 5);
+      // Large slots (> 60 mins)
       
-      ctx.textBaseline = 'top';
-      ctx.font = '600 22px sans-serif'; // Larger
-      ctx.globalAlpha = 0.8;
-      ctx.fillText(formatTime(segment.slotEnd), centerX, centerY + 5);
-      ctx.globalAlpha = 1;
+      if (segment.status === 'mixed') {
+         // MIXED SLOT: Text at Top & Bottom. Time in Center.
+         
+         // 1. Draw Time in Center
+         ctx.textBaseline = 'bottom';
+         ctx.font = '700 24px sans-serif'; 
+         ctx.fillText(formatTime(segment.slotStart, timeZone), centerX, centerY - 5);
+         
+         ctx.textBaseline = 'top';
+         ctx.font = '600 22px sans-serif'; 
+         ctx.globalAlpha = 0.8;
+         ctx.fillText(formatTime(segment.slotEnd, timeZone), centerX, centerY + 5);
+         ctx.globalAlpha = 1;
 
-      if (drawHeight > 130) {
-        let fontSize = 32;
-        ctx.font = `800 ${fontSize}px sans-serif`;
-        const labelText = isChan ? 'БАНЯ + ЧАН' : 'ВІЛЬНО';
-        
-        // Dynamic scaling to fit width
-        const maxWidth = layout.colWidth - 16; // Padding
-        while (ctx.measureText(labelText).width > maxWidth && fontSize > 14) {
-          fontSize -= 2;
-          ctx.font = `800 ${fontSize}px sans-serif`;
-        }
-        
-        // Draw pill behind text for extra contrast if needed, but with dark text on bright bg it should be fine.
-        // Let's just draw text.
-        ctx.fillText(labelText, centerX, drawY + drawHeight - 40);
+         // 2. Draw Labels (Top & Bottom)
+         if (drawHeight > 200) { // Only if enough space
+            ctx.font = '800 24px sans-serif';
+            ctx.fillStyle = '#0f172a'; // Dark text
+            
+            // Top label (Green part)
+            ctx.textBaseline = 'top';
+            ctx.fillText('ВІЛЬНО', centerX, drawY + 20);
+            ctx.font = '600 18px sans-serif';
+            ctx.fillText('(БЕЗ ЧАНУ)', centerX, drawY + 50);
+
+            // Bottom label (Blue part)
+            ctx.textBaseline = 'bottom';
+            ctx.font = '600 18px sans-serif';
+            ctx.fillText('(З ЧАНОМ)', centerX, drawY + drawHeight - 20);
+            ctx.font = '800 24px sans-serif';
+            ctx.fillText('ВІЛЬНО', centerX, drawY + drawHeight - 45);
+         }
+
+      } else {
+         // STANDARD SLOT: Text in Center. Time at Top (Single Line).
+         
+         // 1. Draw Time at Top (Single Line)
+         ctx.fillStyle = COLORS.slots.available.text;
+         ctx.textAlign = 'center';
+         ctx.textBaseline = 'middle';
+         
+         ctx.font = '700 22px sans-serif'; 
+         const timeLabel = `${formatTime(segment.slotStart, timeZone)} – ${formatTime(segment.slotEnd, timeZone)}`;
+         ctx.fillText(timeLabel, centerX, drawY + 20);
+
+         // 2. Draw Labels in Center
+         // Available height for text: drawHeight - 40px (time)
+         // We need about 60px for two lines of text.
+         // So drawHeight > 100 is a good threshold.
+         
+         if (drawHeight > 90) {
+            let fontSize = 32;
+            ctx.font = `800 ${fontSize}px sans-serif`;
+            
+            let mainText = 'ВІЛЬНО';
+            let subText = '(БЕЗ ЧАНУ)';
+            
+            if (segment.status === 'available_with_chan') {
+               mainText = 'ВІЛЬНО';
+               subText = '(З ЧАНОМ)';
+            }
+
+            // Dynamic scaling
+            const maxWidth = layout.colWidth - 16;
+            while (ctx.measureText(mainText).width > maxWidth && fontSize > 18) {
+               fontSize -= 2;
+               ctx.font = `800 ${fontSize}px sans-serif`;
+            }
+
+            // Center Y for text block
+            // We want the text block to be centered in the remaining space? 
+            // Or just centered in the slot, but pushed down slightly?
+            // Center of slot is centerY.
+            // Time is at Top.
+            // So we can just center the text at centerY + 10?
+            
+            ctx.textBaseline = 'middle';
+            // Draw Main Text
+            ctx.fillText(mainText, centerX, centerY - 5);
+            
+            // Draw Sub Text
+            ctx.font = '600 18px sans-serif'; // Slightly smaller subtext
+            ctx.fillText(subText, centerX, centerY + 20);
+         }
       }
     }
   }
@@ -561,13 +683,13 @@ function buildTimeTicks(openTime: string, closeTime: string): TimeTick[] {
   return ticks;
 }
 
-function groupAvailability(availability: AvailabilitySlot[], timeZone: string) {
-  const map = new Map<string, Array<{ start: Date; end: Date; chanAvailable: boolean }>>();
-  availability.forEach((slot) => {
-    const start = toDateAtTime(slot.dateISO, slot.startTime, timeZone);
-    const end = toDateAtTime(slot.dateISO, slot.endTime, timeZone);
-    if (!map.has(slot.dateISO)) map.set(slot.dateISO, []);
-    map.get(slot.dateISO)!.push({ start, end, chanAvailable: slot.chanAvailable !== false });
+function groupBookings(bookings: Booking[], timeZone: string) {
+  const map = new Map<string, Array<{ start: Date; end: Date; withChan: boolean }>>();
+  bookings.forEach((booking) => {
+    const start = toDateAtTime(booking.dateISO, booking.startTime, timeZone);
+    const end = toDateAtTime(booking.dateISO, booking.endTime, timeZone);
+    if (!map.has(booking.dateISO)) map.set(booking.dateISO, []);
+    map.get(booking.dateISO)!.push({ start, end, withChan: booking.withChan });
   });
   return map;
 }
@@ -576,19 +698,41 @@ function resolveSlotStatus(
   iso: string,
   timeStr: string,
   settings: ScheduleSettings,
-  availability: Map<string, Array<{ start: Date; end: Date; chanAvailable: boolean }>>,
+  bookings: Map<string, Array<{ start: Date; end: Date; withChan: boolean }>>,
   now: Date
 ): SlotStatus {
   const slotStart = toDateAtTime(iso, timeStr, settings.timeZone);
   const slotEnd = addMinutes(slotStart, GRID_MINUTE_STEP);
 
-  if (slotEnd <= now) return 'booked';
+  if (slotEnd <= now) return 'booked'; // Past is always booked/busy
 
-  const slots = availability.get(iso) ?? [];
-  const freeSlot = slots.find((entry) => slotStart >= entry.start && slotEnd <= entry.end);
+  const dayBookings = bookings.get(iso) ?? [];
+  
+  // Check if slot is booked
+  const isBooked = dayBookings.some((entry) => 
+    rangesOverlap(slotStart, slotEnd, entry.start, entry.end)
+  );
 
-  if (!freeSlot) return 'booked';
-  return freeSlot.chanAvailable ? 'available_with_chan' : 'available';
+  if (isBooked) return 'booked';
+
+  // If not booked, it's available. Now check Chan.
+  // Chan available if:
+  // 1. Time >= 13:00 (chanStartLimit)
+  // 2. No other booking on this day has withChan === true
+  
+  const chanStartLimit = toDateAtTime(iso, '13:00', settings.timeZone);
+  const isAfterChanStart = slotStart >= chanStartLimit;
+  const chanAlreadyBooked = dayBookings.some(b => b.withChan);
+
+  if (isAfterChanStart && !chanAlreadyBooked) {
+      return 'available_with_chan';
+  }
+
+  return 'available';
+}
+
+function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
+    return aStart < bEnd && bStart < aEnd;
 }
 
 function buildSegments(cells: SlotCell[]): SlotSegment[] {
@@ -596,11 +740,30 @@ function buildSegments(cells: SlotCell[]): SlotSegment[] {
   let current: SlotSegment | null = null;
 
   cells.forEach((cell) => {
-    if (current && current.status === cell.status && current.chanAvailable === cell.chanAvailable) {
+    // Check if we can merge
+    let canMerge = false;
+    
+    if (current) {
+        if (current.status === cell.status && current.chanAvailable === cell.chanAvailable) {
+            // Exact match
+            canMerge = true;
+        } else if (
+            (current.status === 'available' || current.status === 'available_with_chan' || current.status === 'mixed') &&
+            (cell.status === 'available' || cell.status === 'available_with_chan')
+        ) {
+            // Both are available types (maybe different chan status)
+            // We merge them into a 'mixed' segment
+            canMerge = true;
+            current.status = 'mixed'; // Upgrade to mixed
+        }
+    }
+
+    if (canMerge && current) {
       current.endRow = cell.rowIndex + 1;
       current.slotEnd = cell.slotEnd;
       return;
     }
+    
     if (current) segments.push(current);
     
     current = {
@@ -640,8 +803,9 @@ function formatDateInZone(date: Date, timeZone: string, pattern: string): string
   return format(zoned, pattern, { locale: uk });
 }
 
-function formatTime(date: Date): string {
-  return format(date, 'HH:mm');
+function formatTime(date: Date, timeZone: string): string {
+  const zoned = toZonedTime(date, timeZone);
+  return format(zoned, 'HH:mm');
 }
 
 function getDurationMinutes(start: Date, end: Date): number {

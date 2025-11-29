@@ -2,7 +2,7 @@ import path from 'node:path';
 import { config as loadEnv } from 'dotenv';
 import { AppConfig } from './types';
 
-loadEnv();
+loadEnv({ override: true });
 
 function requireEnv(name: string): string {
   const value = process.env[name];

@@ -1,6 +1,6 @@
 import { Telegraf, Markup, Scenes, session } from 'telegraf';
 import type { MiddlewareFn } from 'telegraf';
-import { AppConfig, AvailabilitySlot } from '../types';
+import { AppConfig, Booking } from '../types';
 import { AvailabilityService } from '../services/availabilityService';
 import { createAddSlotScene, ADD_SLOT_SCENE_ID } from './addSlotScene';
 import { formatDate, toDateAtTime, formatDateShort } from '../utils/time';
@@ -10,11 +10,12 @@ import { SettingsStore } from '../storage/settingsStore';
 import { toZonedTime } from 'date-fns-tz';
 import { format } from 'date-fns';
 import { uk } from 'date-fns/locale';
+import { PerfLogger } from '../utils/perfLogger';
 
 type Mode = 'client' | 'admin';
 
 const ADMIN_MENU = [
-  ['➕ Додати слот', '🧹 Очистити день'],
+  ['➕ Додати бронювання', '📋 Показати зайняті слоти'],
   ['📢 Розсилка', '🖼 Показати розклад'],
   ['⚙️ Налаштування'],
 ];
@@ -31,9 +32,54 @@ export function createBot(
   settingsStore: SettingsStore
 ) {
   const bot = new Telegraf<BotContext>(config.botToken);
-  const stage = new Scenes.Stage<BotContext>([createAddSlotScene(service)]);
+  const stage = new Scenes.Stage<BotContext>([
+    createAddSlotScene(
+      service,
+      async (ctx) => {
+        try {
+          await sendScheduleImageWithButton(ctx, service, 0, false, true);
+        } catch (error) {
+          console.error('addSlot callback error:', error);
+          await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
+        }
+      },
+      async (ctx) => {
+        try {
+          await showBookingsOverview(ctx, service, config);
+        } catch (error) {
+          console.error('addSlot showBookings callback error:', error);
+          await ctx.reply('Не вдалося завантажити слоти. Спробуйте ще раз 🙏');
+        }
+      }
+    )
+  ]);
 
   bot.use(session());
+
+  // Global performance logging middleware
+  bot.use(async (ctx, next) => {
+    const updateType = ctx.updateType;
+    let label = `UPDATE: ${updateType}`;
+
+    if (ctx.callbackQuery && 'data' in ctx.callbackQuery) {
+      label = `ACTION: ${ctx.callbackQuery.data}`;
+    } else if (ctx.message && 'text' in ctx.message) {
+      const text = ctx.message.text;
+      if (text.startsWith('/')) {
+        label = `CMD: ${text.split(' ')[0]}`;
+      } else {
+        label = `TEXT: ${text.substring(0, 30)}${text.length > 30 ? '...' : ''}`;
+      }
+    }
+
+    const end = PerfLogger.start(label);
+    try {
+      await next();
+    } finally {
+      end();
+    }
+  });
+
   bot.use(async (ctx, next) => {
     if (ctx.from?.id) {
       await userStore.addUser({
@@ -48,44 +94,44 @@ export function createBot(
   bot.use(stage.middleware());
 
   bot.start(async (ctx) => {
-    console.log('[/start] Command received');
-    const initialMode: Mode = isAdmin(ctx.from?.id, config.adminIds) ? 'admin' : 'client';
-    getBotSession(ctx).mode = initialMode;
+    const end = PerfLogger.start('CMD: /start');
+    try {
+      console.log('[/start] Command received');
+      const initialMode: Mode = isAdmin(ctx.from?.id, config.adminIds) ? 'admin' : 'client';
+      getBotSession(ctx).mode = initialMode;
 
-    if (initialMode === 'admin') {
-      console.log('[/start] Admin mode');
+      if (initialMode === 'admin') {
+        console.log('[/start] Admin mode');
+        await ctx.reply(
+          'Вітаю! Режим адміністратора активований. Користуйтеся кнопками нижче.',
+          buildKeyboard('admin')
+        );
+        return;
+      }
+
+      console.log('[/start] Client mode - sending welcome');
       await ctx.reply(
-        'Вітаю! Режим адміністратора активований. Користуйтеся кнопками нижче.',
-        buildKeyboard('admin')
+        'Ласкаво просимо до нашої бані в Болотні! 🌿',
+        buildKeyboard('client')
       );
-      return;
+      console.log('[/start] Client mode - sending info');
+      const clientInfo = await settingsStore.getClientInfoText();
+      await ctx.reply(clientInfo, Markup.inlineKeyboard([
+        [Markup.button.callback('🖼 Показати розклад', 'client:show:schedule')]
+      ]));
+      console.log('[/start] Completed');
+    } finally {
+      end();
     }
-
-    console.log('[/start] Client mode - sending welcome');
-    await ctx.reply(
-      'Ласкаво просимо до нашої бані в Болотні! 🌿',
-      buildKeyboard('client')
-    );
-    console.log('[/start] Client mode - sending schedule');
-    const session = getBotSession(ctx);
-    session.scheduleWeekOffset = 0;
-    await sendScheduleImageWithButton(ctx, service, 0, false, false);
-    console.log('[/start] Client mode - sending info');
-    const clientInfo = await settingsStore.getClientInfoText();
-    await ctx.reply(clientInfo);
-    console.log('[/start] Completed');
   });
 
-  bot.hears('🎫 Режим клієнта', async (ctx) => {
+  // Приховані команди для переключення режимів
+  bot.command('admin721966', onlyAdmin(config, async (ctx) => {
+    await switchMode(ctx, 'admin', config, settingsStore);
+  }));
+
+  bot.command('client721966', onlyAdmin(config, async (ctx) => {
     await switchMode(ctx, 'client', config, settingsStore);
-  });
-
-  bot.hears('🛠 Режим адміністратора', async (ctx) => {
-    await switchMode(ctx, 'admin', config, settingsStore);
-  });
-
-  bot.command('admin', onlyAdmin(config, async (ctx) => {
-    await switchMode(ctx, 'admin', config, settingsStore);
   }));
 
   bot.command('broadcast', onlyAdmin(config, async (ctx) => {
@@ -93,7 +139,7 @@ export function createBot(
   }));
 
   bot.command('schedule', async (ctx) => {
-    await sendScheduleImage(ctx, service);
+    await sendScheduleImage(ctx, service, config);
   });
 
   bot.command('summary', async (ctx) => {
@@ -101,11 +147,25 @@ export function createBot(
     await ctx.reply(summary);
   });
 
-  bot.command('addslot', onlyAdmin(config, (ctx) => ctx.scene.enter(ADD_SLOT_SCENE_ID)));
+  bot.command('addbooking', onlyAdmin(config, (ctx) => ctx.scene.enter(ADD_SLOT_SCENE_ID)));
 
   bot.hears('ℹ️ Інформація та ціни', async (ctx) => {
     const clientInfo = await settingsStore.getClientInfoText();
-    await ctx.reply(clientInfo);
+    await ctx.reply(clientInfo, Markup.inlineKeyboard([
+      [Markup.button.callback('🖼 Показати розклад', 'client:show:schedule')]
+    ]));
+  });
+
+  bot.action('client:show:schedule', async (ctx) => {
+    await ctx.answerCbQuery();
+    const session = getBotSession(ctx);
+    session.scheduleWeekOffset = 0;
+    try {
+      await sendScheduleImageWithButton(ctx, service, 0, false, false);
+    } catch (error) {
+      console.error('client:show:schedule error:', error);
+      await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
+    }
   });
 
   bot.hears('📞 Контакти', async (ctx) => {
@@ -113,22 +173,47 @@ export function createBot(
   });
 
   bot.hears('🖼 Показати розклад', async (ctx) => {
-    const session = getBotSession(ctx);
-    session.scheduleWeekOffset = 0;
-    const showAllSlots = isAdmin(ctx.from?.id, config.adminIds);
-    await sendScheduleImageWithButton(ctx, service, 0, false, showAllSlots);
+    const end = PerfLogger.start('HEARS: 🖼 Показати розклад');
+    try {
+      const session = getBotSession(ctx);
+      session.scheduleWeekOffset = 0;
+      const showAllSlots = isAdmin(ctx.from?.id, config.adminIds);
+      await sendScheduleImageWithButton(ctx, service, 0, false, showAllSlots);
+    } catch (error) {
+      console.error('hears schedule error:', error);
+      await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
+    } finally {
+      end();
+    }
   });
 
+  bot.hears('➕ Додати бронювання', onlyAdmin(config, async (ctx) => {
+    const end = PerfLogger.start('HEARS: ➕ Додати бронювання');
+    try {
+      console.log('[➕ Додати бронювання] Button pressed');
+      console.log('[➕ Додати бронювання] Current scene:', ctx.scene.current);
+      await ctx.scene.enter(ADD_SLOT_SCENE_ID);
+      console.log('[➕ Додати бронювання] Scene entered');
+    } finally {
+      end();
+    }
+  }));
+
+  // Backward compatibility for users with old keyboard
   bot.hears('➕ Додати слот', onlyAdmin(config, async (ctx) => {
-    console.log('[➕ Додати слот] Button pressed');
-    console.log('[➕ Додати слот] Current scene:', ctx.scene.current);
+    console.log('[➕ Додати слот] Old button pressed');
+    await ctx.reply('Оновлюю меню...', buildKeyboard('admin'));
     await ctx.scene.enter(ADD_SLOT_SCENE_ID);
-    console.log('[➕ Додати слот] Scene entered');
   }));
 
   bot.hears('🧹 Очистити день', onlyAdmin(config, async (ctx) => {
     console.log('[🧹 Очистити день] Button pressed');
     await promptClearDay(ctx, service, config);
+  }));
+
+  bot.hears('📋 Показати зайняті слоти', onlyAdmin(config, async (ctx) => {
+    console.log('[📋 Показати зайняті слоти] Button pressed');
+    await showBookingsOverview(ctx, service, config);
   }));
 
   bot.hears('📢 Розсилка', onlyAdmin(config, async (ctx) => {
@@ -222,7 +307,7 @@ export function createBot(
   }));
 
   bot.action('admin:clear:all:confirm', onlyAdminAction(config, async (ctx) => {
-    const grouped = await service.listSlotsGrouped();
+    const grouped = await service.listBookingsGrouped();
     let totalRemoved = 0;
     for (const group of grouped) {
       const removed = await service.clearDay(group.iso);
@@ -236,21 +321,76 @@ export function createBot(
     );
   }));
 
-  bot.action('admin:clear:all:slots', onlyAdminAction(config, async (ctx) => {
+  bot.action('admin:clear:day:select', onlyAdminAction(config, async (ctx) => {
+    await ctx.answerCbQuery();
+    const grouped = await service.listBookingsGrouped();
+
+    // Фільтруємо минулі дні (як в showBookingsOverview)
+    const now = new Date();
+    const upcoming = grouped
+      .map((group) => ({
+        iso: group.iso,
+        bookings: group.bookings.filter((slot) => {
+          const end = toDateAtTime(slot.dateISO, slot.endTime, service.timeZone);
+          return end > now;
+        }),
+      }))
+      .filter((group) => group.bookings.length > 0);
+
+    if (!upcoming.length) {
+      await ctx.editMessageText('Немає що чистити 😉');
+      return;
+    }
+
+    const buttons = upcoming.map((group) =>
+      Markup.button.callback(formatAdminDate(group.iso, config), `admin:clear:day:${group.iso}`)
+    );
+    const rows = splitIntoRows(buttons, 2);
+    rows.push([Markup.button.callback('⬅️ Назад', 'admin:show:all:bookings')]);
+
+    await ctx.editMessageText(
+      'Який день очистити від бронювань?',
+      Markup.inlineKeyboard(rows)
+    );
+  }));
+
+  bot.action(/^admin:clear:day:(\d{4}-\d{2}-\d{2})$/, onlyAdminAction(config, async (ctx) => {
+    const iso = ctx.match[1];
     await ctx.answerCbQuery();
     await ctx.editMessageText(
-      '⚠️ Точно очистити всі слоти?\n\nЦе видалить всі вільні слоти!',
+      `⚠️ Бажаєте очистити ${formatAdminDate(iso, config)}?\n\nЦе видалить всі бронювання на цей день.`,
       Markup.inlineKeyboard([
         [
-          Markup.button.callback('✅ Так, очистити все', 'admin:clear:all:slots:confirm'),
-          Markup.button.callback('❌ Ні, скасувати', 'admin:clear:all:slots:cancel'),
+          Markup.button.callback('✅ Так, очистити', `admin:clear:day:confirm:${iso}`),
+          Markup.button.callback('❌ Ні, скасувати', 'admin:clear:day:select'),
         ],
       ])
     );
   }));
 
-  bot.action('admin:clear:all:slots:confirm', onlyAdminAction(config, async (ctx) => {
-    const grouped = await service.listSlotsGrouped();
+  bot.action(/^admin:clear:day:confirm:(\d{4}-\d{2}-\d{2})$/, onlyAdminAction(config, async (ctx) => {
+    const iso = ctx.match[1];
+    const removed = await service.clearDay(iso);
+    await ctx.answerCbQuery(removed ? 'Очищено' : 'Слотів не було');
+    // Повертаємось до списку слотів
+    await showBookingsOverview(ctx, service, config, { edit: true });
+  }));
+
+  bot.action('admin:clear:all:bookings', onlyAdminAction(config, async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.editMessageText(
+      '⚠️ Точно очистити всі бронювання?\n\nЦе видалить всі бронювання!',
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Так, очистити все', 'admin:clear:all:bookings:confirm'),
+          Markup.button.callback('❌ Ні, скасувати', 'admin:clear:all:bookings:cancel'),
+        ],
+      ])
+    );
+  }));
+
+  bot.action('admin:clear:all:bookings:confirm', onlyAdminAction(config, async (ctx) => {
+    const grouped = await service.listBookingsGrouped();
     let totalRemoved = 0;
     for (const group of grouped) {
       const removed = await service.clearDay(group.iso);
@@ -264,9 +404,9 @@ export function createBot(
     );
   }));
 
-  bot.action('admin:clear:all:slots:cancel', onlyAdminAction(config, async (ctx) => {
+  bot.action('admin:clear:all:bookings:cancel', onlyAdminAction(config, async (ctx) => {
     await ctx.answerCbQuery('Скасовано');
-    await showSlotsOverview(ctx, service, config, { edit: true });
+    await showBookingsOverview(ctx, service, config, { edit: true });
   }));
 
   bot.action('slot:add:done', onlyAdminAction(config, async (ctx) => {
@@ -280,25 +420,72 @@ export function createBot(
     await ctx.scene.enter(ADD_SLOT_SCENE_ID);
   }));
 
-  bot.action('admin:show:all:slots', onlyAdminAction(config, async (ctx) => {
+  bot.action('slot:show:schedule', onlyAdminAction(config, async (ctx) => {
     await ctx.answerCbQuery();
-    await showSlotsOverview(ctx, service, config);
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    const session = getBotSession(ctx);
+    session.scheduleWeekOffset = 0;
+    try {
+      await sendScheduleImageWithButton(ctx, service, 0, false, true);
+    } catch (error) {
+      console.error('slot:show:schedule error:', error);
+      await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
+    }
   }));
 
-  bot.action(/^schedule:week:(next|prev)$/, async (ctx) => {
-    const direction = ctx.match[1];
-    const session = getBotSession(ctx);
-    const currentOffset = session.scheduleWeekOffset || 0;
-
-    if (direction === 'next') {
-      session.scheduleWeekOffset = currentOffset + 1;
-    } else {
-      session.scheduleWeekOffset = Math.max(0, currentOffset - 1);
-    }
-
+  bot.action('admin:show:all:bookings', onlyAdminAction(config, async (ctx) => {
     await ctx.answerCbQuery();
-    const showAllSlots = isAdmin(ctx.from?.id, config.adminIds);
-    await sendScheduleImageWithButton(ctx, service, session.scheduleWeekOffset, true, showAllSlots);
+    await showBookingsOverview(ctx, service, config);
+  }));
+
+  // Backward compatibility for old buttons
+  bot.action('admin:show:all:slots', onlyAdminAction(config, async (ctx) => {
+    await ctx.answerCbQuery();
+    await showBookingsOverview(ctx, service, config);
+  }));
+
+  bot.action('schedule:refresh', async (ctx) => {
+    const end = PerfLogger.start('ACTION: schedule:refresh');
+    try {
+      const session = getBotSession(ctx);
+      const currentOffset = session.scheduleWeekOffset || 0;
+      // Не робимо answerCbQuery тут - зробимо після результату
+      const result = await sendScheduleImageWithButton(ctx, service, currentOffset, true, false);
+      if (result === 'not_modified') {
+        await ctx.answerCbQuery('Розклад актуальний ✓');
+      } else {
+        await ctx.answerCbQuery('Оновлено ✓');
+      }
+    } catch (error) {
+      console.error('schedule:refresh error:', error);
+      await ctx.answerCbQuery('Помилка оновлення');
+    } finally {
+      end();
+    }
+  });
+
+  bot.action(/^schedule:week:(next|prev)$/, async (ctx) => {
+    const end = PerfLogger.start(`ACTION: schedule:week:${ctx.match[1]}`);
+    try {
+      const direction = ctx.match[1];
+      const session = getBotSession(ctx);
+      const currentOffset = session.scheduleWeekOffset || 0;
+
+      if (direction === 'next') {
+        session.scheduleWeekOffset = currentOffset + 1;
+      } else {
+        session.scheduleWeekOffset = Math.max(0, currentOffset - 1);
+      }
+
+      await ctx.answerCbQuery();
+      const showAllSlots = isAdmin(ctx.from?.id, config.adminIds);
+      await sendScheduleImageWithButton(ctx, service, session.scheduleWeekOffset, true, showAllSlots);
+    } catch (error) {
+      console.error('schedule:week error:', error);
+      await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
+    } finally {
+      end();
+    }
   });
 
   bot.action('BROADCAST_CONFIRM', onlyAdminAction(config, async (ctx) => {
@@ -401,7 +588,7 @@ export function createBot(
   });
 
   bot.action('slot:back', onlyAdminAction(config, async (ctx) => {
-    await showSlotsOverview(ctx, service, config, { edit: true });
+    await showBookingsOverview(ctx, service, config, { edit: true });
     await ctx.answerCbQuery();
   }));
 
@@ -410,7 +597,7 @@ export function createBot(
     const cbData = ctx.callbackQuery && 'data' in ctx.callbackQuery ? ctx.callbackQuery.data : 'N/A';
     console.log('[slot:view] Callback data:', cbData);
     console.log('[slot:view] Extracted slotId:', slotId);
-    const ok = await showSlotDetail(ctx, service, config, slotId);
+    const ok = await showBookingDetail(ctx, service, config, slotId);
     if (!ok) {
       await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
       return;
@@ -420,27 +607,108 @@ export function createBot(
 
   bot.action(/^slot:delete:([^:]+)$/, onlyAdminAction(config, async (ctx) => {
     const slotId = ctx.match[1];
-    const removed = await service.removeSlot(slotId);
+    const removed = await service.removeBooking(slotId);
     if (!removed) {
       await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
       return;
     }
-    await showSlotsOverview(ctx, service, config, { edit: true });
+    await showBookingsOverview(ctx, service, config, { edit: true });
     await ctx.answerCbQuery('Слот видалено');
   }));
 
   bot.action(/^slot:toggle:([^:]+)$/, onlyAdminAction(config, async (ctx) => {
     const slotId = ctx.match[1];
+
+    // Перевіряємо чи є конфлікт
+    const check = await service.checkChanConflict(slotId);
+
+    if (!check.canEnable && check.reason) {
+      // Перевіряємо чи це ранній час (до 13:00) - показуємо попередження
+      if (check.reason.includes('13:00') || check.reason.includes('раніше')) {
+        const slot = await service.getBookingById(slotId);
+        if (slot) {
+          await ctx.answerCbQuery();
+          await ctx.editMessageText(
+            `⚠️ Ранній час для чану\n\n` +
+            `📅 ${formatAdminDate(slot.dateISO, config)}\n` +
+            `⏰ ${slot.startTime} – ${slot.endTime}\n\n` +
+            `Зазвичай чан доступний з 13:00.\n` +
+            `Ви впевнені, що хочете додати чан на такий ранній час?`,
+            Markup.inlineKeyboard([
+              [
+                Markup.button.callback('✅ Так, додати чан', `slot:toggle:early:${slotId}`),
+                Markup.button.callback('❌ Ні, без чану', `slot:view:${slotId}`),
+              ],
+            ])
+          );
+          return;
+        }
+      }
+      // Інша помилка - показуємо як alert
+      await ctx.answerCbQuery(check.reason, { show_alert: true });
+      return;
+    }
+
+    if (!check.canEnable && check.conflictBooking) {
+      // Попередження про інше бронювання з чаном - але дозволяємо додати
+      const conflict = check.conflictBooking;
+      await ctx.answerCbQuery();
+      await ctx.editMessageText(
+        `⚠️ Сьогодні вже є чан\n\n` +
+        `Чан на: ${conflict.startTime} – ${conflict.endTime}\n\n` +
+        `Додати чан і на це бронювання?`,
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback('✅ Так, додати', `slot:toggle:confirm:${slotId}`),
+            Markup.button.callback('❌ Залишити без чану', `slot:view:${slotId}`),
+          ],
+        ])
+      );
+      return;
+    }
+
+    // Немає конфліктів - просто toggle
     try {
-      await service.toggleChanAvailability(slotId);
-      const ok = await showSlotDetail(ctx, service, config, slotId, 'Статус чану змінено');
+      await service.toggleChanStatus(slotId);
+      const ok = await showBookingDetail(ctx, service, config, slotId, 'Статус чану змінено');
       if (!ok) {
         await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
         return;
       }
       await ctx.answerCbQuery();
     } catch (error) {
-      await ctx.answerCbQuery('Не вдалося змінити слот', { show_alert: true });
+      await ctx.answerCbQuery(error instanceof Error ? error.message : 'Не вдалося змінити слот', { show_alert: true });
+    }
+  }));
+
+  bot.action(/^slot:toggle:confirm:([^:]+)$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    try {
+      await service.toggleChanStatus(slotId, true); // force = true
+      const ok = await showBookingDetail(ctx, service, config, slotId, 'Чан перенесено');
+      if (!ok) {
+        await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+        return;
+      }
+      await ctx.answerCbQuery('Чан перенесено');
+    } catch (error) {
+      await ctx.answerCbQuery(error instanceof Error ? error.message : 'Не вдалося змінити слот', { show_alert: true });
+    }
+  }));
+
+  // Підтвердження чану на ранній час (до 13:00)
+  bot.action(/^slot:toggle:early:([^:]+)$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    try {
+      await service.toggleChanStatus(slotId, true); // force = true для раннього часу
+      const ok = await showBookingDetail(ctx, service, config, slotId, 'Чан додано');
+      if (!ok) {
+        await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+        return;
+      }
+      await ctx.answerCbQuery('Чан додано');
+    } catch (error) {
+      await ctx.answerCbQuery(error instanceof Error ? error.message : 'Не вдалося змінити слот', { show_alert: true });
     }
   }));
 
@@ -463,18 +731,145 @@ export function createBot(
     await showEndSelection(ctx, service, config, slotId, startTime);
   }));
 
+  // Після вибору нового часу - показуємо вибір чану
   bot.action(/^slot:edit:apply:([^:]+):([0-9]{4}):([0-9]{4})$/, onlyAdminAction(config, async (ctx) => {
     const slotId = ctx.match[1];
-    const startTime = decodeTimeKey(ctx.match[2]);
-    const endTime = decodeTimeKey(ctx.match[3]);
+    const startKey = ctx.match[2];
+    const endKey = ctx.match[3];
+    const startTime = decodeTimeKey(startKey);
+    const endTime = decodeTimeKey(endKey);
+
+    const slot = await service.getBookingById(slotId);
+    if (!slot) {
+      await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+      return;
+    }
+
+    // Перевіряємо чи чан можливий для нового часу (тільки проблеми з розігрівом блокують)
+    const chanCheck = await service.isChanHeatingPossible(slot.dateISO, startTime);
+    const isHeatingProblem = !chanCheck.possible &&
+      chanCheck.reason !== 'Чан вже заброньовано на цей день' &&
+      chanCheck.reason !== 'Чан доступний тільки з 13:00';
+
+    await ctx.answerCbQuery();
+
+    const text = [
+      '✏️ Редагування слота',
+      `📅 ${formatAdminDate(slot.dateISO, config)}`,
+      `⏱ Новий час: ${startTime} – ${endTime}`,
+      '',
+      isHeatingProblem ? `⚠️ ${chanCheck.reason}` : 'Чи це бронювання з чаном? 🛁',
+    ].join('\n');
+
+    const buttons = [];
+    if (!isHeatingProblem) {
+      buttons.push([
+        Markup.button.callback('✅ Так, з чаном', `slot:edit:final:${slotId}:${startKey}:${endKey}:yes`),
+        Markup.button.callback('❌ Без чану', `slot:edit:final:${slotId}:${startKey}:${endKey}:no`),
+      ]);
+    } else {
+      buttons.push([
+        Markup.button.callback('✅ Зберегти без чану', `slot:edit:final:${slotId}:${startKey}:${endKey}:no`),
+      ]);
+    }
+    buttons.push([Markup.button.callback('⬅️ Назад', `slot:edit:start:${slotId}:${startKey}`)]);
+
+    await ctx.editMessageText(text, Markup.inlineKeyboard(buttons));
+  }));
+
+  // Фінальне застосування змін з чаном
+  bot.action(/^slot:edit:final:([^:]+):([0-9]{4}):([0-9]{4}):(yes|no)$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    const startKey = ctx.match[2];
+    const endKey = ctx.match[3];
+    const startTime = decodeTimeKey(startKey);
+    const endTime = decodeTimeKey(endKey);
+    const withChan = ctx.match[4] === 'yes';
+
+    // Якщо хочуть чан на ранній час - показуємо попередження
+    if (withChan) {
+      const startMinutes = timeLabelToMinutes(startTime);
+      const chanStartMinutes = 13 * 60; // 13:00
+      if (startMinutes < chanStartMinutes) {
+        const slot = await service.getBookingById(slotId);
+        if (!slot) {
+          await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+          return;
+        }
+
+        await ctx.answerCbQuery();
+        const text = [
+          '⚠️ Ранній час для чану',
+          '',
+          `📅 ${formatAdminDate(slot.dateISO, config)}`,
+          `⏰ Час: ${startTime} – ${endTime}`,
+          '',
+          'Зазвичай чан доступний з 13:00.',
+          'Ви впевнені, що хочете бронювання з чаном на такий ранній час?',
+        ].join('\n');
+
+        await ctx.editMessageText(text, Markup.inlineKeyboard([
+          [
+            Markup.button.callback('✅ Так, з чаном', `slot:edit:confirm:early:${slotId}:${startKey}:${endKey}`),
+            Markup.button.callback('❌ Без чану', `slot:edit:final:${slotId}:${startKey}:${endKey}:no`),
+          ],
+          [Markup.button.callback('⬅️ Назад', `slot:edit:apply:${slotId}:${startKey}:${endKey}`)],
+        ]));
+        return;
+      }
+    }
+
     try {
-      await service.updateSlotTimes(slotId, startTime, endTime);
-      const ok = await showSlotDetail(ctx, service, config, slotId, 'Слот оновлено');
+      // Оновлюємо час та чан
+      await service.updateBookingTimes(slotId, startTime, endTime);
+      if (withChan) {
+        // Якщо хочуть чан - перевіряємо і додаємо
+        const slot = await service.getBookingById(slotId);
+        if (slot && !slot.withChan) {
+          await service.toggleChanStatus(slotId, true); // force = true
+        }
+      } else {
+        // Якщо не хочуть чан - прибираємо
+        const slot = await service.getBookingById(slotId);
+        if (slot && slot.withChan) {
+          await service.toggleChanStatus(slotId);
+        }
+      }
+
+      const ok = await showBookingDetail(ctx, service, config, slotId, 'Бронювання оновлено');
       if (!ok) {
         await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
         return;
       }
-      await ctx.answerCbQuery();
+      await ctx.answerCbQuery('Збережено');
+    } catch (error) {
+      await ctx.answerCbQuery(error instanceof Error ? error.message : 'Не вдалося оновити слот', {
+        show_alert: true,
+      });
+    }
+  }));
+
+  // Підтвердження раннього чану при редагуванні
+  bot.action(/^slot:edit:confirm:early:([^:]+):([0-9]{4}):([0-9]{4})$/, onlyAdminAction(config, async (ctx) => {
+    const slotId = ctx.match[1];
+    const startTime = decodeTimeKey(ctx.match[2]);
+    const endTime = decodeTimeKey(ctx.match[3]);
+
+    try {
+      // Оновлюємо час
+      await service.updateBookingTimes(slotId, startTime, endTime);
+      // Додаємо чан з force = true (для раннього часу)
+      const slot = await service.getBookingById(slotId);
+      if (slot && !slot.withChan) {
+        await service.toggleChanStatus(slotId, true);
+      }
+
+      const ok = await showBookingDetail(ctx, service, config, slotId, 'Бронювання оновлено');
+      if (!ok) {
+        await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
+        return;
+      }
+      await ctx.answerCbQuery('Збережено');
     } catch (error) {
       await ctx.answerCbQuery(error instanceof Error ? error.message : 'Не вдалося оновити слот', {
         show_alert: true,
@@ -520,8 +915,10 @@ function onlyAdminAction(
 async function sendScheduleImage(
   ctx: BotContext,
   service: AvailabilityService,
+  config: AppConfig,
   caption = 'Актуальний розклад 👇'
 ) {
+  const end = PerfLogger.start('FUNC: sendScheduleImage');
   try {
     const result = await service.buildScheduleImage();
     const keyboard = buildKeyboard(getMode(ctx));
@@ -535,6 +932,8 @@ async function sendScheduleImage(
   } catch (error) {
     console.error('Failed to send schedule image', error);
     await ctx.reply('Не вдалося згенерувати картинку. Спробуйте пізніше 🙏');
+  } finally {
+    end();
   }
 }
 
@@ -544,7 +943,8 @@ async function sendScheduleImageWithButton(
   weekOffset = 0,
   edit = false,
   showAllSlotsButton = false
-) {
+): Promise<'success' | 'not_modified'> {
+  const end = PerfLogger.start('FUNC: sendScheduleImageWithButton');
   try {
     const result = await service.buildScheduleImage(weekOffset);
 
@@ -568,23 +968,35 @@ async function sendScheduleImageWithButton(
 
     const keyboard = [navButtons];
     if (showAllSlotsButton) {
-      keyboard.push([Markup.button.callback('📋 Показати всі слоти', 'admin:show:all:slots')]);
+      keyboard.push([Markup.button.callback('📋 Показати всі зайняті слоти', 'admin:show:all:bookings')]);
+    } else {
+      // Для клієнтів - кнопка оновити
+      keyboard.push([Markup.button.callback('🔄 Оновити розклад', 'schedule:refresh')]);
     }
 
     if (edit && ctx.callbackQuery && 'message' in ctx.callbackQuery && ctx.callbackQuery.message) {
       // Редагуємо медіа замість видалення повідомлення
-      await ctx.editMessageMedia(
-        {
-          type: 'photo',
-          media: { source: result.buffer },
-          caption
-        },
-        {
-          reply_markup: {
-            inline_keyboard: keyboard
+      try {
+        await ctx.editMessageMedia(
+          {
+            type: 'photo',
+            media: { source: result.buffer },
+            caption
+          },
+          {
+            reply_markup: {
+              inline_keyboard: keyboard
+            }
           }
+        );
+      } catch (editError: unknown) {
+        // Перевіряємо чи це помилка "message is not modified"
+        const errorMessage = editError instanceof Error ? editError.message : String(editError);
+        if (errorMessage.includes('message is not modified')) {
+          return 'not_modified';
         }
-      );
+        throw editError;
+      }
     } else {
       await ctx.replyWithPhoto(
         { source: result.buffer },
@@ -596,32 +1008,37 @@ async function sendScheduleImageWithButton(
         }
       );
     }
+    return 'success';
   } catch (error) {
     console.error('Failed to send schedule image', error);
-    await ctx.reply('Не вдалося згенерувати картинку. Спробуйте пізніше 🙏');
+    throw error;
+  } finally {
+    end();
   }
 }
 
-async function showSlotsOverview(
+async function showBookingsOverview(
   ctx: BotContext,
   service: AvailabilityService,
   config: AppConfig,
   options: { edit?: boolean } = {}
 ) {
-  const grouped = await service.listSlotsGrouped();
+  const end = PerfLogger.start('FUNC: showBookingsOverview');
+  const grouped = await service.listBookingsGrouped();
+  console.log(`[showBookingsOverview] Got ${grouped.length} groups`);
   const now = new Date();
   const upcoming = grouped
     .map((group) => ({
       iso: group.iso,
-      slots: group.slots.filter((slot) => {
+      bookings: group.bookings.filter((slot) => {
         const end = toDateAtTime(slot.dateISO, slot.endTime, service.timeZone);
         return end > now;
       }),
     }))
-    .filter((group) => group.slots.length > 0);
+    .filter((group) => group.bookings.length > 0);
 
   if (!upcoming.length) {
-    const message = 'Поки що актуальних слотів немає.';
+    const message = 'Поки що актуальних бронювань немає.';
     if (options.edit) {
       await ctx.editMessageText(message);
     } else {
@@ -630,19 +1047,20 @@ async function showSlotsOverview(
     return;
   }
 
-  const text = buildSlotListText(upcoming, config);
-  const keyboard = Markup.inlineKeyboard(buildSlotButtons(upcoming, config));
+  const text = buildBookingListText(upcoming, config);
+  const keyboard = Markup.inlineKeyboard(buildBookingButtons(upcoming, config));
 
   if (options.edit) {
     await ctx.editMessageText(text, { reply_markup: keyboard.reply_markup });
   } else {
     await ctx.reply(text, keyboard);
   }
+  end();
 }
 
 async function promptClearDay(ctx: BotContext, service: AvailabilityService, config: AppConfig) {
   console.log('[promptClearDay] Function called');
-  const grouped = await service.listSlotsGrouped();
+  const grouped = await service.listBookingsGrouped();
   console.log('[promptClearDay] Found groups:', grouped.length);
   if (!grouped.length) {
     await ctx.reply('Немає що чистити 😉');
@@ -659,36 +1077,36 @@ async function promptClearDay(ctx: BotContext, service: AvailabilityService, con
 
   console.log('[promptClearDay] Sending reply with buttons');
   await ctx.reply(
-    'Який день очистити від вільних слотів?',
+    'Який день очистити від бронювань?',
     Markup.inlineKeyboard(rows)
   );
   console.log('[promptClearDay] Reply sent');
 }
 
-function buildSlotListText(
-  grouped: Array<{ iso: string; slots: AvailabilitySlot[] }>,
+function buildBookingListText(
+  grouped: Array<{ iso: string; bookings: Booking[] }>,
   config: AppConfig
 ): string {
   const blocks = grouped.map((group) => {
     const dayLabel = formatAdminDate(group.iso, config);
-    const slots = group.slots
+    const slots = group.bookings
       .map((slot) => {
-        const chanStatus = slot.chanAvailable ? 'З чаном 🟢' : 'Без чану 🔴';
+        const chanStatus = slot.withChan ? 'З чаном 🔵' : 'Без чану 🟡';
         return `• ${slot.startTime} – ${slot.endTime}\n${chanStatus}`;
       })
       .join('\n');
     return `📅 ${dayLabel}\n${slots}`;
   });
-  return ['Оберіть слот, щоб керувати ним:', ...blocks].join('\n\n');
+  return ['Оберіть бронювання, щоб керувати ним:', ...blocks].join('\n\n');
 }
 
-function buildSlotButtons(
-  grouped: Array<{ iso: string; slots: AvailabilitySlot[] }>,
+function buildBookingButtons(
+  grouped: Array<{ iso: string; bookings: Booking[] }>,
   config: AppConfig
 ) {
   const slotButtons = grouped.flatMap((group) =>
-    group.slots.map((slot) => {
-      const chanIcon = slot.chanAvailable ? ' 🛁' : '';
+    group.bookings.map((slot) => {
+      const chanIcon = slot.withChan ? ' 🔵' : ' 🟡';
       return [
         Markup.button.callback(
           `${formatAdminDate(group.iso, config)} • ${slot.startTime} – ${slot.endTime}${chanIcon}`,
@@ -698,29 +1116,30 @@ function buildSlotButtons(
     })
   );
 
-  // Додаємо кнопку "Очистити всі слоти" в кінці
+  // Додаємо кнопки дій внизу
   slotButtons.push([
-    Markup.button.callback('🧹 Очистити всі слоти', 'admin:clear:all:slots')
+    Markup.button.callback('🧹 Очистити день', 'admin:clear:day:select'),
+    Markup.button.callback('🗑 Очистити все', 'admin:clear:all:bookings')
   ]);
 
   return slotButtons;
 }
 
-async function showSlotDetail(
+async function showBookingDetail(
   ctx: BotContext,
   service: AvailabilityService,
   config: AppConfig,
   slotId: string,
   notice?: string
 ): Promise<boolean> {
-  console.log('[showSlotDetail] Looking for slotId:', slotId);
-  const slot = await service.getSlotById(slotId);
-  console.log('[showSlotDetail] Found slot:', slot ? slot.id : 'NOT FOUND');
+  console.log('[showBookingDetail] Looking for slotId:', slotId);
+  const slot = await service.getBookingById(slotId);
+  console.log('[showBookingDetail] Found slot:', slot ? slot.id : 'NOT FOUND');
   if (!slot) {
     return false;
   }
 
-  const chanStatus = slot.chanAvailable ? '🛁 З чаном 🟢' : '🛁 Без чану 🔴';
+  const chanStatus = slot.withChan ? '🛁 З чаном 🔵' : '🛁 Без чану 🟡';
   const lines = [
     notice ? `ℹ️ ${notice}` : null,
     `📅 ${formatAdminDate(slot.dateISO, config)}`,
@@ -732,11 +1151,11 @@ async function showSlotDetail(
 
   await ctx.editMessageText(lines.join('\n'), {
     reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('✏️ Редагувати', `slot:edit:${slot.id}`)],
-      [Markup.button.callback('🗑 Очистити', `slot:delete:${slot.id}`)],
+      [Markup.button.callback('✏️ Редагувати це бронювання', `slot:edit:${slot.id}`)],
+      [Markup.button.callback('🗑 Видалити це бронювання', `slot:delete:${slot.id}`)],
       [
         Markup.button.callback(
-          slot.chanAvailable ? '🚫 Вимкнути чан' : '✅ Увімкнути чан',
+          slot.withChan ? '🛁 Прибрати чан' : '🛁 Додати чан',
           `slot:toggle:${slot.id}`
         ),
       ],
@@ -753,7 +1172,7 @@ async function showStartSelection(
   slotId: string
 ) {
   console.log('[showStartSelection] Looking for slotId:', slotId);
-  const slot = await service.getSlotById(slotId);
+  const slot = await service.getBookingById(slotId);
   console.log('[showStartSelection] Found slot:', slot ? slot.id : 'NOT FOUND');
   if (!slot) {
     await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
@@ -786,7 +1205,7 @@ async function showEndSelection(
   startTime: string
 ) {
   console.log('[showEndSelection] Looking for slotId:', slotId);
-  const slot = await service.getSlotById(slotId);
+  const slot = await service.getBookingById(slotId);
   console.log('[showEndSelection] Found slot:', slot ? slot.id : 'NOT FOUND');
   if (!slot) {
     await ctx.answerCbQuery('Слот не знайдено', { show_alert: true });
@@ -916,10 +1335,8 @@ function buildKeyboard(mode: Mode) {
   const rows: string[][] = [];
 
   if (mode === 'admin') {
-    rows.push(['🎫 Режим клієнта']);
     rows.push(...ADMIN_MENU);
   } else {
-    // Клієнти бачать тільки CLIENT_MENU без кнопки переключення режиму
     rows.push(...CLIENT_MENU);
   }
 

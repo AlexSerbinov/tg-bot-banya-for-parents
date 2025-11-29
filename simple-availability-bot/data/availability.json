@@ -1,142 +1,112 @@
 [
   {
-    "id": "b77de311c6",
-    "dateISO": "2025-11-16",
-    "startTime": "10:00",
-    "endTime": "13:00",
+    "id": "46ac36e5b8",
+    "dateISO": "2025-11-28",
+    "startTime": "09:00",
+    "endTime": "11:00",
+    "durationMinutes": 120,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-26T09:01:39.688Z",
+    "withChan": false
+  },
+  {
+    "id": "49cd82016a",
+    "dateISO": "2025-11-28",
+    "startTime": "16:00",
+    "endTime": "19:00",
     "durationMinutes": 180,
     "createdBy": 350985285,
-    "createdAt": "2025-11-15T20:08:02.150Z",
-    "chanAvailable": true
+    "createdAt": "2025-11-26T08:53:33.802Z",
+    "withChan": true
   },
   {
-    "id": "31be8f4371",
-    "dateISO": "2025-11-16",
-    "startTime": "18:00",
-    "endTime": "22:00",
-    "durationMinutes": 240,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-15T20:15:03.285Z",
-    "chanAvailable": false
-  },
-  {
-    "id": "26e89cc094",
-    "dateISO": "2025-11-20",
-    "startTime": "09:00",
-    "endTime": "14:00",
+    "id": "f1388f4a24",
+    "dateISO": "2025-11-29",
+    "startTime": "12:00",
+    "endTime": "17:00",
     "durationMinutes": 300,
     "createdBy": 350985285,
-    "createdAt": "2025-11-16T22:41:35.922Z",
-    "chanAvailable": false
+    "createdAt": "2025-11-26T09:02:02.851Z",
+    "withChan": false
   },
   {
-    "id": "8e48cdfdfe",
-    "dateISO": "2025-11-23",
-    "startTime": "11:00",
-    "endTime": "13:00",
-    "durationMinutes": 120,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-22T19:52:01.790Z",
-    "chanAvailable": true
-  },
-  {
-    "id": "b40a735309",
-    "dateISO": "2025-11-23",
-    "startTime": "15:00",
-    "endTime": "18:30",
-    "durationMinutes": 210,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-22T19:52:16.232Z",
-    "chanAvailable": false
-  },
-  {
-    "id": "797d655a0c",
-    "dateISO": "2025-11-24",
-    "startTime": "09:30",
-    "endTime": "16:30",
-    "durationMinutes": 420,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-22T20:08:50.666Z",
-    "chanAvailable": false
-  },
-  {
-    "id": "fae36428ba",
-    "dateISO": "2025-11-24",
-    "startTime": "17:00",
-    "endTime": "19:00",
-    "durationMinutes": 120,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-22T20:09:03.944Z",
-    "chanAvailable": false
-  },
-  {
-    "id": "a1e6ae93f5",
-    "dateISO": "2025-11-24",
-    "startTime": "19:30",
-    "endTime": "22:30",
-    "durationMinutes": 180,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-22T20:09:16.836Z",
-    "chanAvailable": true
-  },
-  {
-    "id": "550ae596e7",
-    "dateISO": "2025-11-25",
-    "startTime": "09:00",
-    "endTime": "23:00",
-    "durationMinutes": 840,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-22T21:01:18.082Z",
-    "chanAvailable": true
-  },
-  {
-    "id": "11c2b65fe8",
-    "dateISO": "2025-11-26",
-    "startTime": "09:00",
-    "endTime": "23:00",
-    "durationMinutes": 840,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-22T21:01:47.245Z",
-    "chanAvailable": false
-  },
-  {
-    "id": "177e8c17e7",
-    "dateISO": "2025-11-27",
-    "startTime": "09:00",
-    "endTime": "17:00",
-    "durationMinutes": 480,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-23T21:09:27.360Z",
-    "chanAvailable": false
-  },
-  {
-    "id": "c832692c18",
-    "dateISO": "2025-11-27",
+    "id": "7d604ef032",
+    "dateISO": "2025-12-02",
     "startTime": "20:00",
     "endTime": "23:00",
     "durationMinutes": 180,
     "createdBy": 350985285,
-    "createdAt": "2025-11-23T21:09:42.460Z",
-    "chanAvailable": true
+    "createdAt": "2025-11-29T21:34:26.244Z",
+    "withChan": true
   },
   {
-    "id": "932569a127",
-    "dateISO": "2025-11-29",
-    "startTime": "09:00",
-    "endTime": "13:00",
-    "durationMinutes": 240,
-    "createdBy": 350985285,
-    "createdAt": "2025-11-23T21:31:42.717Z",
-    "chanAvailable": false
-  },
-  {
-    "id": "3a7fe98f59",
-    "dateISO": "2025-11-29",
+    "id": "0f46c83280",
+    "dateISO": "2025-12-02",
     "startTime": "13:00",
-    "endTime": "23:00",
-    "durationMinutes": 600,
+    "endTime": "15:00",
+    "durationMinutes": 120,
     "createdBy": 350985285,
-    "createdAt": "2025-11-23T21:31:42.720Z",
-    "chanAvailable": true
+    "createdAt": "2025-11-29T21:34:41.930Z",
+    "withChan": true
+  },
+  {
+    "id": "9aefcaaadd",
+    "dateISO": "2025-12-03",
+    "startTime": "09:00",
+    "endTime": "11:00",
+    "durationMinutes": 120,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-29T21:57:00.169Z",
+    "withChan": true
+  },
+  {
+    "id": "6b13fcca95",
+    "dateISO": "2025-12-04",
+    "startTime": "09:00",
+    "endTime": "11:00",
+    "durationMinutes": 120,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-29T21:59:19.888Z",
+    "withChan": true
+  },
+  {
+    "id": "c65bfa27f2",
+    "dateISO": "2025-12-05",
+    "startTime": "16:00",
+    "endTime": "19:00",
+    "durationMinutes": 180,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-29T22:01:46.765Z",
+    "withChan": true
+  },
+  {
+    "id": "8a33af3a48",
+    "dateISO": "2025-12-01",
+    "startTime": "09:00",
+    "endTime": "11:00",
+    "durationMinutes": 120,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-29T21:23:48.805Z",
+    "withChan": false
+  },
+  {
+    "id": "9a69aa1767",
+    "dateISO": "2025-12-01",
+    "startTime": "20:00",
+    "endTime": "23:00",
+    "durationMinutes": 180,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-29T21:23:32.749Z",
+    "withChan": true
+  },
+  {
+    "id": "fe98cfa26d",
+    "dateISO": "2025-12-06",
+    "startTime": "09:00",
+    "endTime": "11:00",
+    "durationMinutes": 120,
+    "createdBy": 350985285,
+    "createdAt": "2025-11-29T22:06:48.384Z",
+    "withChan": true
   }
 ]
