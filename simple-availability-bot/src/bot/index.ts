@@ -15,9 +15,9 @@ import { PerfLogger } from '../utils/perfLogger';
 type Mode = 'client' | 'admin';
 
 const ADMIN_MENU = [
-  ['➕ Додати бронювання', '📋 Показати зайняті слоти'],
-  ['📢 Розсилка', '🖼 Показати розклад'],
-  ['⚙️ Налаштування'],
+  ['➕ Додати бронювання'],
+  ['🖼 Показати розклад', '📋 Показати зайняті слоти'],
+  ['📢 Розсилка', '⚙️ Налаштування'],
 ];
 
 const CLIENT_MENU = [
@@ -37,7 +37,7 @@ export function createBot(
       service,
       async (ctx) => {
         try {
-          await sendScheduleImageWithButton(ctx, service, 0, false, true);
+          await sendScheduleImageWithButton(ctx, service, settingsStore, 0, false, true);
         } catch (error) {
           console.error('addSlot callback error:', error);
           await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
@@ -49,6 +49,22 @@ export function createBot(
         } catch (error) {
           console.error('addSlot showBookings callback error:', error);
           await ctx.reply('Не вдалося завантажити слоти. Спробуйте ще раз 🙏');
+        }
+      },
+      async (ctx) => {
+        try {
+          await startBroadcastFlow(ctx);
+        } catch (error) {
+          console.error('addSlot broadcast callback error:', error);
+          await ctx.reply('Не вдалося відкрити розсилку. Спробуйте ще раз 🙏');
+        }
+      },
+      async (ctx) => {
+        try {
+          await showSettingsMenu(ctx, settingsStore);
+        } catch (error) {
+          console.error('addSlot settings callback error:', error);
+          await ctx.reply('Не вдалося відкрити налаштування. Спробуйте ще раз 🙏');
         }
       }
     )
@@ -139,7 +155,7 @@ export function createBot(
   }));
 
   bot.command('schedule', async (ctx) => {
-    await sendScheduleImage(ctx, service, config);
+    await sendScheduleImage(ctx, service, config, settingsStore);
   });
 
   bot.command('summary', async (ctx) => {
@@ -161,7 +177,7 @@ export function createBot(
     const session = getBotSession(ctx);
     session.scheduleWeekOffset = 0;
     try {
-      await sendScheduleImageWithButton(ctx, service, 0, false, false);
+      await sendScheduleImageWithButton(ctx, service, settingsStore, 0, false, false);
     } catch (error) {
       console.error('client:show:schedule error:', error);
       await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
@@ -178,7 +194,7 @@ export function createBot(
       const session = getBotSession(ctx);
       session.scheduleWeekOffset = 0;
       const showAllSlots = isAdmin(ctx.from?.id, config.adminIds);
-      await sendScheduleImageWithButton(ctx, service, 0, false, showAllSlots);
+      await sendScheduleImageWithButton(ctx, service, settingsStore, 0, false, showAllSlots);
     } catch (error) {
       console.error('hears schedule error:', error);
       await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
@@ -277,20 +293,59 @@ export function createBot(
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
   }));
 
+  bot.action('settings:toggle:unavailable', onlyAdminAction(config, async (ctx) => {
+    const newValue = await settingsStore.toggleShowUnavailableSlots();
+    await ctx.answerCbQuery(newValue ? 'Показуються' : 'Приховані');
+    await showSettingsMenu(ctx, settingsStore, true);
+  }));
+
   bot.action(/^admin:clear:(\d{4}-\d{2}-\d{2})$/, onlyAdminAction(config, async (ctx) => {
     const iso = ctx.match[1];
-    const removed = await service.clearDay(iso);
-    await ctx.answerCbQuery(removed ? 'Прибрали' : 'Слотів не було');
+    await ctx.answerCbQuery();
+
+    // Отримуємо бронювання на цей день
+    const grouped = await service.listBookingsGrouped();
+    const dayGroup = grouped.find((g) => g.iso === iso);
+    const slots = dayGroup?.bookings ?? [];
+
+    // Формуємо список бронювань
+    let slotsList = '';
+    if (slots.length > 0) {
+      slotsList = '\n\nБронювання на цей день:\n' + slots.map((s) => `• ${s.startTime} – ${s.endTime}`).join('\n');
+    }
+
+    // Кнопки для видалення окремих слотів
+    const slotButtons = slots.map((s) =>
+      [Markup.button.callback(`🗑 Видалити ${s.startTime} – ${s.endTime}`, `slot:delete:${s.id}`)]
+    );
+
     await ctx.editMessageText(
-      removed
-        ? `✅ Прибрано ${removed} слот(и) на ${formatAdminDate(iso, config)}`
-        : `На ${formatAdminDate(iso, config)} й так нічого не було`
+      `⚠️ Бажаєте очистити ${formatAdminDate(iso, config)}?${slotsList}\n\nЦе видалить всі бронювання на цей день.`,
+      Markup.inlineKeyboard([
+        ...slotButtons,
+        [
+          Markup.button.callback('✅ Очистити день', `admin:clear:confirm:${iso}`),
+          Markup.button.callback('❌ Скасувати', 'admin:clear:cancel'),
+        ],
+      ])
     );
   }));
 
   bot.action('admin:clear:cancel', onlyAdminAction(config, async (ctx) => {
     await ctx.answerCbQuery('Скасовано');
     await ctx.editMessageText('Гаразд, нічого не чистимо 👍');
+  }));
+
+  // Підтвердження очищення конкретного дня
+  bot.action(/^admin:clear:confirm:(\d{4}-\d{2}-\d{2})$/, onlyAdminAction(config, async (ctx) => {
+    const iso = ctx.match[1];
+    const removed = await service.clearDay(iso);
+    await ctx.answerCbQuery(removed ? 'Очищено' : 'Слотів не було');
+    await ctx.editMessageText(
+      removed
+        ? `✅ Прибрано ${removed} слот(и) на ${formatAdminDate(iso, config)}`
+        : `На ${formatAdminDate(iso, config)} й так нічого не було`
+    );
   }));
 
   bot.action('admin:clear:all', onlyAdminAction(config, async (ctx) => {
@@ -357,12 +412,30 @@ export function createBot(
   bot.action(/^admin:clear:day:(\d{4}-\d{2}-\d{2})$/, onlyAdminAction(config, async (ctx) => {
     const iso = ctx.match[1];
     await ctx.answerCbQuery();
+
+    // Отримуємо бронювання на цей день
+    const grouped = await service.listBookingsGrouped();
+    const dayGroup = grouped.find((g) => g.iso === iso);
+    const slots = dayGroup?.bookings ?? [];
+
+    // Формуємо список бронювань
+    let slotsList = '';
+    if (slots.length > 0) {
+      slotsList = '\n\nБронювання на цей день:\n' + slots.map((s) => `• ${s.startTime} – ${s.endTime}`).join('\n');
+    }
+
+    // Кнопки для видалення окремих слотів
+    const slotButtons = slots.map((s) =>
+      [Markup.button.callback(`🗑 Видалити ${s.startTime} – ${s.endTime}`, `slot:delete:${s.id}`)]
+    );
+
     await ctx.editMessageText(
-      `⚠️ Бажаєте очистити ${formatAdminDate(iso, config)}?\n\nЦе видалить всі бронювання на цей день.`,
+      `⚠️ Бажаєте очистити ${formatAdminDate(iso, config)}?${slotsList}\n\nЦе видалить всі бронювання на цей день.`,
       Markup.inlineKeyboard([
+        ...slotButtons,
         [
-          Markup.button.callback('✅ Так, очистити', `admin:clear:day:confirm:${iso}`),
-          Markup.button.callback('❌ Ні, скасувати', 'admin:clear:day:select'),
+          Markup.button.callback('✅ Очистити день', `admin:clear:day:confirm:${iso}`),
+          Markup.button.callback('❌ Скасувати', 'admin:clear:day:select'),
         ],
       ])
     );
@@ -426,7 +499,7 @@ export function createBot(
     const session = getBotSession(ctx);
     session.scheduleWeekOffset = 0;
     try {
-      await sendScheduleImageWithButton(ctx, service, 0, false, true);
+      await sendScheduleImageWithButton(ctx, service, settingsStore, 0, false, true);
     } catch (error) {
       console.error('slot:show:schedule error:', error);
       await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
@@ -450,7 +523,7 @@ export function createBot(
       const session = getBotSession(ctx);
       const currentOffset = session.scheduleWeekOffset || 0;
       // Не робимо answerCbQuery тут - зробимо після результату
-      const result = await sendScheduleImageWithButton(ctx, service, currentOffset, true, false);
+      const result = await sendScheduleImageWithButton(ctx, service, settingsStore, currentOffset, true, false);
       if (result === 'not_modified') {
         await ctx.answerCbQuery('Розклад актуальний ✓');
       } else {
@@ -479,7 +552,7 @@ export function createBot(
 
       await ctx.answerCbQuery();
       const showAllSlots = isAdmin(ctx.from?.id, config.adminIds);
-      await sendScheduleImageWithButton(ctx, service, session.scheduleWeekOffset, true, showAllSlots);
+      await sendScheduleImageWithButton(ctx, service, settingsStore, session.scheduleWeekOffset, true, showAllSlots);
     } catch (error) {
       console.error('schedule:week error:', error);
       await ctx.reply('Не вдалося завантажити розклад. Спробуйте ще раз 🙏');
@@ -503,7 +576,7 @@ export function createBot(
     let success = 0;
     let failed = 0;
     const formatted =
-      '🔥 Повідомлення від власників бані 🔥\n' +
+      '🔥 Повідомлення від власників бані в Болотні 🔥\n' +
       '━━━━━━━━━━━━━━━\n\n' +
       `${draft}\n\n` +
       '━━━━━━━━━━━━━━━';
@@ -637,7 +710,7 @@ export function createBot(
             Markup.inlineKeyboard([
               [
                 Markup.button.callback('✅ Так, додати чан', `slot:toggle:early:${slotId}`),
-                Markup.button.callback('❌ Ні, без чану', `slot:view:${slotId}`),
+                Markup.button.callback('🟡 Ні, без чану', `slot:view:${slotId}`),
               ],
             ])
           );
@@ -764,8 +837,8 @@ export function createBot(
     const buttons = [];
     if (!isHeatingProblem) {
       buttons.push([
-        Markup.button.callback('✅ Так, з чаном', `slot:edit:final:${slotId}:${startKey}:${endKey}:yes`),
-        Markup.button.callback('❌ Без чану', `slot:edit:final:${slotId}:${startKey}:${endKey}:no`),
+        Markup.button.callback('🔵 Так, з чаном', `slot:edit:final:${slotId}:${startKey}:${endKey}:yes`),
+        Markup.button.callback('🟡 Без чану', `slot:edit:final:${slotId}:${startKey}:${endKey}:no`),
       ]);
     } else {
       buttons.push([
@@ -810,8 +883,8 @@ export function createBot(
 
         await ctx.editMessageText(text, Markup.inlineKeyboard([
           [
-            Markup.button.callback('✅ Так, з чаном', `slot:edit:confirm:early:${slotId}:${startKey}:${endKey}`),
-            Markup.button.callback('❌ Без чану', `slot:edit:final:${slotId}:${startKey}:${endKey}:no`),
+            Markup.button.callback('🔵 Так, з чаном', `slot:edit:confirm:early:${slotId}:${startKey}:${endKey}`),
+            Markup.button.callback('🟡 Без чану', `slot:edit:final:${slotId}:${startKey}:${endKey}:no`),
           ],
           [Markup.button.callback('⬅️ Назад', `slot:edit:apply:${slotId}:${startKey}:${endKey}`)],
         ]));
@@ -916,11 +989,13 @@ async function sendScheduleImage(
   ctx: BotContext,
   service: AvailabilityService,
   config: AppConfig,
+  settingsStore: SettingsStore,
   caption = 'Актуальний розклад 👇'
 ) {
   const end = PerfLogger.start('FUNC: sendScheduleImage');
   try {
-    const result = await service.buildScheduleImage();
+    const showUnavailable = await settingsStore.getShowUnavailableSlots();
+    const result = await service.buildScheduleImage(0, showUnavailable);
     const keyboard = buildKeyboard(getMode(ctx));
     await ctx.replyWithPhoto(
       { source: result.buffer },
@@ -940,13 +1015,15 @@ async function sendScheduleImage(
 async function sendScheduleImageWithButton(
   ctx: BotContext,
   service: AvailabilityService,
+  settingsStore: SettingsStore,
   weekOffset = 0,
   edit = false,
   showAllSlotsButton = false
 ): Promise<'success' | 'not_modified'> {
   const end = PerfLogger.start('FUNC: sendScheduleImageWithButton');
   try {
-    const result = await service.buildScheduleImage(weekOffset);
+    const showUnavailable = await settingsStore.getShowUnavailableSlots();
+    const result = await service.buildScheduleImage(weekOffset, showUnavailable);
 
     // Отримуємо діапазон дат для caption
     const days = service.getScheduleDays(weekOffset);
@@ -1119,7 +1196,7 @@ function buildBookingButtons(
   // Додаємо кнопки дій внизу
   slotButtons.push([
     Markup.button.callback('🧹 Очистити день', 'admin:clear:day:select'),
-    Markup.button.callback('🗑 Очистити все', 'admin:clear:all:bookings')
+    Markup.button.callback('🗑 Видалити всі ', 'admin:clear:all:bookings')
   ]);
 
   return slotButtons;
@@ -1151,8 +1228,8 @@ async function showBookingDetail(
 
   await ctx.editMessageText(lines.join('\n'), {
     reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('✏️ Редагувати це бронювання', `slot:edit:${slot.id}`)],
-      [Markup.button.callback('🗑 Видалити це бронювання', `slot:delete:${slot.id}`)],
+      [Markup.button.callback('✏️ Редагувати', `slot:edit:${slot.id}`)],
+      [Markup.button.callback('🗑 Видалити', `slot:delete:${slot.id}`)],
       [
         Markup.button.callback(
           slot.withChan ? '🛁 Прибрати чан' : '🛁 Додати чан',
@@ -1354,15 +1431,26 @@ function buildBroadcastConfirmKeyboard() {
   ]);
 }
 
-async function showSettingsMenu(ctx: BotContext, settingsStore: SettingsStore) {
-  await ctx.reply(
-    '⚙️ Налаштування бота\n\n' +
-    'Оберіть опцію для налаштування:',
-    Markup.inlineKeyboard([
-      [Markup.button.callback('📄 Показати інформаційний текст', 'settings:show:clientinfo')],
-      [Markup.button.callback('❌ Закрити', 'settings:back')]
-    ])
-  );
+async function showSettingsMenu(ctx: BotContext, settingsStore: SettingsStore, edit = false) {
+  const showUnavailable = await settingsStore.getShowUnavailableSlots();
+  // Кнопка як екшн - показуємо що можна зробити
+  const unavailableLabel = showUnavailable
+    ? '👁 Не показувати недоступні слоти на графіку'
+    : '👁 Показувати недоступні слоти на графіку';
+
+  const text = '⚙️ Налаштування бота\n\n' +
+    'Оберіть опцію для налаштування:';
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('📄 Показати інформаційний текст', 'settings:show:clientinfo')],
+    [Markup.button.callback(unavailableLabel, 'settings:toggle:unavailable')],
+    [Markup.button.callback('❌ Закрити', 'settings:back')]
+  ]);
+
+  if (edit) {
+    await ctx.editMessageText(text, keyboard);
+  } else {
+    await ctx.reply(text, keyboard);
+  }
 }
 
 async function startBroadcastFlow(ctx: BotContext) {
@@ -1372,7 +1460,9 @@ async function startBroadcastFlow(ctx: BotContext) {
 
   await ctx.reply(
     '📢 Введіть текст повідомлення для розсилки.\n' +
-      'Воно буде показане всім користувачам, які колись писали цьому боту.'
+      'Воно буде показане всім користувачам, які колись писали цьому боту..\n' +
+      '\n' +
+      '(Просто напишіть повідомлення у формі нижче і відправте як звичайне повідомлення)'
   );
 }
 async function ensureSceneLeft(ctx: BotContext) {

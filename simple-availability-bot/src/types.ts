@@ -43,6 +43,7 @@ export interface BookingCreationPayload {
 
 export interface BotSettings {
   clientInfoText: string;
+  showUnavailableSlots?: boolean; // Показувати недоступні слоти на розкладі (default: true)
 }
 
 // Alias для зворотної сумісності

@@ -60,4 +60,22 @@ export class SettingsStore {
     const settings = await this.load();
     return settings.clientInfoText;
   }
+
+  async getShowUnavailableSlots(): Promise<boolean> {
+    const settings = await this.load();
+    return settings.showUnavailableSlots ?? true; // default: true
+  }
+
+  async setShowUnavailableSlots(value: boolean): Promise<void> {
+    const settings = await this.load();
+    settings.showUnavailableSlots = value;
+    await this.save(settings);
+  }
+
+  async toggleShowUnavailableSlots(): Promise<boolean> {
+    const current = await this.getShowUnavailableSlots();
+    const newValue = !current;
+    await this.setShowUnavailableSlots(newValue);
+    return newValue;
+  }
 }

@@ -124,6 +124,7 @@ interface GenerateImageArgs {
   settings: ScheduleSettings;
   bookings: Booking[];
   aggregateSlots?: boolean;
+  showUnavailableSlots?: boolean; // Показувати недоступні слоти (default: true)
 }
 
 export async function generateAvailabilityImage({
@@ -131,6 +132,7 @@ export async function generateAvailabilityImage({
   settings,
   bookings,
   aggregateSlots = true,
+  showUnavailableSlots = true,
 }: GenerateImageArgs): Promise<WeeklyScheduleImageResult> {
   const end = PerfLogger.start('IMAGE: generateAvailabilityImage');
   try {
@@ -151,6 +153,7 @@ export async function generateAvailabilityImage({
   
   // 2. Контент
   drawHeaderSection(ctx, days, settings, layout);
+  drawLegend(ctx, PADDING_X, PADDING_Y + 170, showUnavailableSlots);
   drawTimeColumn(ctx, timeTicks, layout);
   drawDayHeaders(ctx, days, layout, settings.timeZone);
   
@@ -189,12 +192,12 @@ export async function generateAvailabilityImage({
     if (aggregateSlots) {
       const segments = buildSegments(cells);
       segments.forEach(segment => {
-        drawSlotSegment(ctx, segment, colX, layout, settings.timeZone);
+        drawSlotSegment(ctx, segment, colX, layout, settings.timeZone, showUnavailableSlots);
       });
     }
   });
 
-  drawFooter(ctx, layout);
+  drawFooter(ctx, layout, showUnavailableSlots);
 
     const buffer = canvas.toBuffer('image/png');
     
@@ -291,17 +294,18 @@ function drawHeaderSection(
   ctx.fillText(`Графік роботи: ${settings.dayOpenTime} – ${settings.dayCloseTime}`, PADDING_X, PADDING_Y + 125);
 
   ctx.shadowColor = 'transparent'; // Reset shadow
-  
-  // Legend moved to top right (below header)
-  drawLegend(ctx, PADDING_X, PADDING_Y + 170);
 }
 
-function drawLegend(ctx: SKRSContext2D, leftX: number, topY: number) {
+function drawLegend(ctx: SKRSContext2D, leftX: number, topY: number, showUnavailableSlots: boolean) {
   const items = [
     { color: COLORS.slots.available.end, label: 'Вільно - лише баня без чану' },
     { color: COLORS.slots.availableChan.end, label: 'Вільно - баня і чан' },
-    { color: 'rgba(127, 29, 29, 0.9)', label: 'Зайнято' }
   ];
+
+  // Додаємо "Зайнято" тільки якщо показуємо недоступні слоти
+  if (showUnavailableSlots) {
+    items.push({ color: 'rgba(127, 29, 29, 0.9)', label: 'Зайнято' });
+  }
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
@@ -321,14 +325,21 @@ function drawLegend(ctx: SKRSContext2D, leftX: number, topY: number) {
     if (item.label === 'Зайнято') ctx.globalAlpha = 0.5;
     ctx.fill();
     ctx.restore();
-    
+
     // Label
     ctx.fillStyle = COLORS.text.secondary;
     ctx.fillText(item.label, currentX + 45, centerY);
-    
+
     const labelWidth = ctx.measureText(item.label).width;
     currentX += (labelWidth + 80); // More spacing
   });
+
+  // Якщо не показуємо недоступні слоти - додаємо дисклеймер ПІД легендою
+  if (!showUnavailableSlots) {
+    ctx.font = '500 24px "Inter", sans-serif';
+    ctx.fillStyle = 'rgba(214, 211, 209, 0.7)';
+    ctx.fillText('Всі слоти, які не позначені як вільно, вважаються зайнятими', leftX, topY + 40);
+  }
 }
 
 function drawTimeColumn(
@@ -345,15 +356,17 @@ function drawTimeColumn(
 
   ticks.forEach((tick, idx) => {
     if (tick.label) {
-      const y = layout.gridY + (idx * rowHeight); 
-      // Додаємо ледь помітну лінію на всю ширину
+      const y = layout.gridY + (idx * rowHeight);
+      // Тонка пунктирна біла лінія через весь графік
       ctx.save();
-      ctx.strokeStyle = COLORS.ui.gridLines;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]); // пунктир: 6px лінія, 4px пробіл
       ctx.beginPath();
       ctx.moveTo(PADDING_X + TIME_COLUMN_WIDTH, y);
       ctx.lineTo(CANVAS_WIDTH - PADDING_X, y);
       ctx.stroke();
+      ctx.setLineDash([]); // скидаємо пунктир
       ctx.restore();
 
       ctx.fillText(tick.label, PADDING_X + TIME_COLUMN_WIDTH - 24, y);
@@ -416,7 +429,8 @@ function drawSlotSegment(
   segment: SlotSegment,
   x: number,
   layout: ReturnType<typeof calculateLayout>,
-  timeZone: string
+  timeZone: string,
+  showUnavailableSlots: boolean
 ) {
   const rowCount = segment.endRow - segment.startRow;
   const height = rowCount * layout.rowHeight;
@@ -429,7 +443,11 @@ function drawSlotSegment(
 
 
   if (segment.status === 'booked') {
-    // Booked - Subtle Beige Box (Village Style)
+    // Якщо не показувати недоступні - просто пропускаємо
+    if (!showUnavailableSlots) {
+      return;
+    }
+
     // Booked - Red/Dark "Unavailable" style
     ctx.fillStyle = 'rgba(127, 29, 29, 0.9)'; // Dark Red
     ctx.strokeStyle = 'rgba(254, 202, 202, 0.3)'; // Light Red border
@@ -440,17 +458,26 @@ function drawSlotSegment(
     ctx.fill();
     ctx.stroke();
 
-    // Text "НЕДОСТУПНО"
+    // Text with time range
     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    
-    if (drawHeight > 30) {
+    const centerX = x + layout.colWidth / 2;
+    const centerY = drawY + drawHeight / 2;
+
+    if (drawHeight > 60) {
+      // Показуємо час та "НЕДОСТУПНО"
+      ctx.font = '600 18px "Inter", sans-serif';
+      const timeLabel = `${formatTime(segment.slotStart, timeZone)} – ${formatTime(segment.slotEnd, timeZone)}`;
+      ctx.fillText(timeLabel, centerX, centerY - 12);
+
       ctx.font = '700 16px "Inter", sans-serif';
-      const centerX = x + layout.colWidth / 2;
-      const centerY = drawY + drawHeight / 2;
+      ctx.fillText('НЕДОСТУПНО', centerX, centerY + 12);
+    } else if (drawHeight > 30) {
+      // Тільки "НЕДОСТУПНО"
+      ctx.font = '700 16px "Inter", sans-serif';
       ctx.fillText('НЕДОСТУПНО', centerX, centerY);
-    } 
+    }
 
   } else {
     // Available or Mixed
@@ -630,9 +657,9 @@ function drawSlotSegment(
   }
 }
 
-function drawFooter(ctx: SKRSContext2D, layout: ReturnType<typeof calculateLayout>) {
+function drawFooter(ctx: SKRSContext2D, layout: ReturnType<typeof calculateLayout>, showUnavailableSlots: boolean) {
   const y = layout.totalHeight - 24;
-  
+
   // Line
   ctx.beginPath();
   ctx.moveTo(PADDING_X, y - 20);
@@ -707,19 +734,28 @@ function resolveSlotStatus(
   if (slotEnd <= now) return 'booked'; // Past is always booked/busy
 
   const dayBookings = bookings.get(iso) ?? [];
-  
+
   // Check if slot is booked
-  const isBooked = dayBookings.some((entry) => 
+  const isBooked = dayBookings.some((entry) =>
     rangesOverlap(slotStart, slotEnd, entry.start, entry.end)
   );
 
   if (isBooked) return 'booked';
 
+  // Якщо є бронювання, яке закінчується о 22:00 або пізніше,
+  // то слоти з 22:00 до кінця дня недоступні (не вистачить часу на мін. 2-годинне бронювання)
+  const lateThreshold = toDateAtTime(iso, '22:00', settings.timeZone);
+  const hasLateBooking = dayBookings.some((entry) => entry.end >= lateThreshold);
+
+  if (hasLateBooking && slotStart >= lateThreshold) {
+    return 'booked';
+  }
+
   // If not booked, it's available. Now check Chan.
   // Chan available if:
   // 1. Time >= 13:00 (chanStartLimit)
   // 2. No other booking on this day has withChan === true
-  
+
   const chanStartLimit = toDateAtTime(iso, '13:00', settings.timeZone);
   const isAfterChanStart = slotStart >= chanStartLimit;
   const chanAlreadyBooked = dayBookings.some(b => b.withChan);
@@ -786,9 +822,11 @@ function timeToMinutes(timeStr: string): number {
 }
 
 function minutesToLabel(totalMinutes: number): string {
-  const h = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+  let h = Math.floor(totalMinutes / 60);
+  // 24:00 -> 00:00
+  if (h === 24) h = 0;
   const m = (totalMinutes % 60).toString().padStart(2, '0');
-  return `${h}:${m}`;
+  return `${h.toString().padStart(2, '0')}:${m}`;
 }
 
 function formatRange(days: Date[], timeZone: string): string {

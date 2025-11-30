@@ -37,7 +37,9 @@ interface AddBookingWizardState {
 export function createAddSlotScene(
   service: AvailabilityService,
   onShowSchedule?: (ctx: BotContext) => Promise<void>,
-  onShowBookings?: (ctx: BotContext) => Promise<void>
+  onShowBookings?: (ctx: BotContext) => Promise<void>,
+  onBroadcast?: (ctx: BotContext) => Promise<void>,
+  onSettings?: (ctx: BotContext) => Promise<void>
 ) {
   return new Scenes.WizardScene<BotContext>(
     SCENE_ID,
@@ -80,6 +82,24 @@ export function createAddSlotScene(
               return;
             }
 
+            // Розсилка - обробляємо і виходимо
+            if (text === '📢 Розсилка') {
+              await ctx.scene.leave();
+              if (onBroadcast) {
+                await onBroadcast(ctx);
+              }
+              return;
+            }
+
+            // Налаштування - обробляємо і виходимо
+            if (text === '⚙️ Налаштування') {
+              await ctx.scene.leave();
+              if (onSettings) {
+                await onSettings(ctx);
+              }
+              return;
+            }
+
             // Інші кнопки меню або команди - просто виходимо
             const otherMenuButtons = [
               '📋 Інформація',
@@ -87,7 +107,7 @@ export function createAddSlotScene(
               '➕ Додати бронювання',
               '📅 Переглянути бронювання',
               '🗑 Очистити день',
-              '📢 Розсилка',
+              '🧹 Очистити день',
               '🎫 Режим клієнта',
               '🛠 Режим адміністратора',
             ];
@@ -532,7 +552,7 @@ async function showChanWarning(ctx: BotContext, state: AddBookingWizardState) {
   const keyboard = Markup.inlineKeyboard([
     [
       Markup.button.callback('✅ Так, додати', CONFIRM_CHAN_WARNING_ACTION),
-      Markup.button.callback('❌ Без чану', SKIP_CHAN_ACTION),
+      Markup.button.callback('🟡 Без чану', SKIP_CHAN_ACTION),
     ],
     [Markup.button.callback('⬅️ Назад', BACK_ACTION)]
   ]);
@@ -557,8 +577,8 @@ async function showEarlyChanWarning(ctx: BotContext, state: AddBookingWizardStat
 
   const keyboard = Markup.inlineKeyboard([
     [
-      Markup.button.callback('✅ Так, з чаном', CONFIRM_EARLY_CHAN_ACTION),
-      Markup.button.callback('❌ Без чану', SKIP_CHAN_ACTION),
+      Markup.button.callback('🔵 Так, з чаном', CONFIRM_EARLY_CHAN_ACTION),
+      Markup.button.callback('🟡 Без чану', SKIP_CHAN_ACTION),
     ],
     [Markup.button.callback('⬅️ Назад', BACK_ACTION)]
   ]);
@@ -580,39 +600,25 @@ async function handleFullDay(ctx: BotContext, service: AvailabilityService, stat
   try {
     await ctx.answerCbQuery('Бронюю весь день...');
 
-    // 1. 09:00-13:00 (No Chan)
-    const booking1 = await service.addBooking({
+    // Одне бронювання на весь день без чану
+    const booking = await service.addBooking({
       dateISO,
       startTime: '09:00',
-      endTime: '13:00',
-      createdBy: ctx.from?.id ?? 0,
-      withChan: false,
-    });
-
-    // 2. 13:00-24:00 (With Chan)
-    const booking2 = await service.addBooking({
-      dateISO,
-      startTime: '13:00',
       endTime: '24:00',
       createdBy: ctx.from?.id ?? 0,
-      withChan: true,
+      withChan: false,
     });
 
     const resultText = [
       '✅ Заброньовано весь день!',
       '',
       `📅 ${dateLabel}`,
-      '',
-      '1️⃣ Ранок:',
-      `⏱ ${booking1.startTime} – ${booking1.endTime}`,
-      `🛁 Чан: ні (топиться)`,
-      '',
-      '2️⃣ День/Вечір:',
-      `⏱ ${booking2.startTime} – ${booking2.endTime}`,
-      `🛁 Чан: так`,
+      `⏱ ${booking.startTime} – ${booking.endTime}`,
+      `🛁 Чан: ні`,
     ].join('\n');
 
     const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('🛁 Додати чан', `slot:toggle:${booking.id}`)],
       [Markup.button.callback('➕ Додати ще бронювання', 'slot:add:another')],
       [Markup.button.callback('🖼 Показати розклад', 'slot:show:schedule')],
       [Markup.button.callback('🏠 Головне меню', 'slot:add:done')]
@@ -763,7 +769,7 @@ function buildStartTimesKeyboard(service: AvailabilityService, dateISO: string, 
   const rows = splitIntoRows(buttons, 3);
 
   const { dayOpenTime, dayCloseTime } = service.schedule;
-  rows.unshift([Markup.button.callback(`⚡️ Весь день (${dayOpenTime} - ${dayCloseTime})`, FULL_DAY_ACTION)]);
+  rows.unshift([Markup.button.callback(`⚡️ Увесь день недоступний(${dayOpenTime} - ${dayCloseTime})`, FULL_DAY_ACTION)]);
 
   rows.push([
     Markup.button.callback('⬅️ Назад', BACK_ACTION),
@@ -806,8 +812,8 @@ function buildEndTimesKeyboard(options: string[], dayBookings: Array<{ startTime
 function buildChanAvailabilityKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback('✅ Так, з чаном', 'slot:add:chan:yes'),
-      Markup.button.callback('❌ Ні, без чану', 'slot:add:chan:no'),
+      Markup.button.callback('🔵 Так, з чаном', 'slot:add:chan:yes'),
+      Markup.button.callback('🟡 Ні, без чану', 'slot:add:chan:no'),
     ],
     [
       Markup.button.callback('⬅️ Назад', BACK_ACTION),

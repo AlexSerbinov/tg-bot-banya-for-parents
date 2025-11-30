@@ -426,24 +426,18 @@ export class AvailabilityService {
       });
   }
 
-  async buildScheduleImage(weekOffset = 0) {
+  async buildScheduleImage(weekOffset = 0, showUnavailableSlots = true) {
     const end = PerfLogger.start('SERVICE: buildScheduleImage');
     try {
       const daysMeta = this.getScheduleDays(weekOffset);
       const days = daysMeta.map((meta) => meta.date);
-      
-      // We need to pass BOOKINGS to the image generator, but the image generator expects "AvailabilitySlots" (which were free slots).
-      // We need to update the image generator to accept Bookings and calculate free slots internally OR
-      // we calculate free slots here and pass them as "AvailabilitySlots" (renamed to FreeSlots).
-      // The plan said "Update logic to render 'Free' slots based on the calculated free time ranges."
-      // So I should probably update the image generator to accept `Booking[]` and do the math, OR pass `FreeSlot[]`.
-      // Passing `Booking[]` is cleaner as it's the source of truth.
-      
+
       const bookings = await this.store.list();
       return generateAvailabilityImage({
         days,
         settings: this.schedule,
-        bookings, // Pass bookings!
+        bookings,
+        showUnavailableSlots,
       });
     } finally {
       end();
